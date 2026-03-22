@@ -1,5 +1,5 @@
 //@version=6
-indicator("Quarterly Theory Boxes | Auto NY Cycles", overlay=true, max_boxes_count=80, max_labels_count=80, max_lines_count=20)
+indicator("Quarterly Theory Boxes | Auto NY Cycles", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=200)
 
 const string NY_TZ = "America/New_York"
 const int MINUTE_MS = 60 * 1000
@@ -8,6 +8,8 @@ cycleModeInput = input.string("Auto", "Cycle", options=["Auto", "22.5m", "90m", 
 showLabels = input.bool(true, "Show Quarter Labels (Q1-Q4)", group="Display Settings")
 showTrueOpen = input.bool(true, "Show True Open (Q2 Open)", group="Display Settings")
 showCycleTag = input.bool(true, "Show Active Cycle Tag", group="Display Settings")
+showHistoricalCycles = input.bool(false, "Show Historical Q Cycles", group="Display Settings")
+historicalCyclesToKeep = input.int(20, "Historical Cycles To Keep", minval=1, maxval=100, group="Display Settings")
 boxTransparency = input.int(85, "Box Transparency", minval=0, maxval=100, group="Display Settings")
 borderWidth = input.int(1, "Box Border Width", minval=1, maxval=4, group="Display Settings")
 
@@ -26,10 +28,6 @@ safeMax(currentValue, nextValue) =>
 
 safeMin(currentValue, nextValue) =>
     na(currentValue) ? nextValue : math.min(currentValue, nextValue)
-
-labelTextColor(baseColor) =>
-    brightness = color.r(baseColor) * 0.299 + color.g(baseColor) * 0.587 + color.b(baseColor) * 0.114
-    brightness > 160 ? color.black : color.white
 
 quarterMidpoint(startBar, endBar) =>
     startBar + int(math.floor((endBar - startBar) / 2))
@@ -125,6 +123,10 @@ var quarterHighs = array.new_float(4, na)
 var quarterLows = array.new_float(4, na)
 var quarterStartBars = array.new_int(4, na)
 var quarterEndBars = array.new_int(4, na)
+var historicalBoxes = array.new_box()
+var historicalLabels = array.new_label()
+var historicalTrueOpenLines = array.new_line()
+var historicalTrueOpenLabels = array.new_label()
 
 var line trueOpenLine = na
 var label trueOpenLabel = na
@@ -134,6 +136,8 @@ var int trueOpenStartBar = na
 var int lastCycleStartTs = na
 var int lastQuarterIndex = na
 var string lastCycleName = ""
+var int historicalCycleCount = 0
+var bool lastShowHistoricalCycles = false
 
 updateQuarterVisual(qIndex) =>
     startBar = array.get(quarterStartBars, qIndex)
@@ -157,26 +161,58 @@ updateQuarterVisual(qIndex) =>
     if showLabels
         labelX = quarterMidpoint(startBar, endBar)
         if na(existingLabel)
-            existingLabel := label.new(labelX, qHigh, quarterName(qIndex), style=label.style_label_down, color=qColor, textcolor=labelTextColor(qColor), size=size.tiny)
+            existingLabel := label.new(labelX, qHigh, quarterName(qIndex), style=label.style_label_down, color=qColor, textcolor=color.black, size=size.tiny)
             array.set(quarterLabels, qIndex, existingLabel)
         else
             label.set_x(existingLabel, labelX)
             label.set_y(existingLabel, qHigh)
             label.set_text(existingLabel, quarterName(qIndex))
             label.set_color(existingLabel, qColor)
-            label.set_textcolor(existingLabel, labelTextColor(qColor))
+            label.set_textcolor(existingLabel, color.black)
     else if not na(existingLabel)
         label.delete(existingLabel)
         array.set(quarterLabels, qIndex, na)
 
+if not showHistoricalCycles and lastShowHistoricalCycles
+    if array.size(historicalBoxes) > 0
+        for idx = 0 to array.size(historicalBoxes) - 1
+            historicalBox = array.get(historicalBoxes, idx)
+            if not na(historicalBox)
+                box.delete(historicalBox)
+    if array.size(historicalLabels) > 0
+        for idx = 0 to array.size(historicalLabels) - 1
+            historicalLabel = array.get(historicalLabels, idx)
+            if not na(historicalLabel)
+                label.delete(historicalLabel)
+    if array.size(historicalTrueOpenLines) > 0
+        for idx = 0 to array.size(historicalTrueOpenLines) - 1
+            historicalLine = array.get(historicalTrueOpenLines, idx)
+            if not na(historicalLine)
+                line.delete(historicalLine)
+    if array.size(historicalTrueOpenLabels) > 0
+        for idx = 0 to array.size(historicalTrueOpenLabels) - 1
+            historicalTrueOpenLabel = array.get(historicalTrueOpenLabels, idx)
+            if not na(historicalTrueOpenLabel)
+                label.delete(historicalTrueOpenLabel)
+    array.clear(historicalBoxes)
+    array.clear(historicalLabels)
+    array.clear(historicalTrueOpenLines)
+    array.clear(historicalTrueOpenLabels)
+    historicalCycleCount := 0
+
 isNewCycle = barstate.isfirst or activeCycle != lastCycleName or cycleStartTs != lastCycleStartTs
 if isNewCycle
+    shouldArchiveCycle = showHistoricalCycles and not barstate.isfirst
     for idx = 0 to 3
         existingBox = array.get(quarterBoxes, idx)
-        if not na(existingBox)
+        if shouldArchiveCycle
+            array.push(historicalBoxes, existingBox)
+        else if not na(existingBox)
             box.delete(existingBox)
         existingLabel = array.get(quarterLabels, idx)
-        if not na(existingLabel)
+        if shouldArchiveCycle
+            array.push(historicalLabels, existingLabel)
+        else if not na(existingLabel)
             label.delete(existingLabel)
         array.set(quarterBoxes, idx, na)
         array.set(quarterLabels, idx, na)
@@ -184,14 +220,37 @@ if isNewCycle
         array.set(quarterLows, idx, na)
         array.set(quarterStartBars, idx, na)
         array.set(quarterEndBars, idx, na)
-    if not na(trueOpenLine)
+    if shouldArchiveCycle and showTrueOpen
+        array.push(historicalTrueOpenLines, trueOpenLine)
+    else if not na(trueOpenLine)
         line.delete(trueOpenLine)
-        trueOpenLine := na
-    if not na(trueOpenLabel)
+    trueOpenLine := na
+    if shouldArchiveCycle and showTrueOpen
+        array.push(historicalTrueOpenLabels, trueOpenLabel)
+    else if not na(trueOpenLabel)
         label.delete(trueOpenLabel)
-        trueOpenLabel := na
+    trueOpenLabel := na
     trueOpenPrice := na
     trueOpenStartBar := na
+    if showHistoricalCycles and not barstate.isfirst
+        historicalCycleCount := historicalCycleCount + 1
+        if historicalCycleCount > historicalCyclesToKeep
+            historicalCycleCount := historicalCyclesToKeep
+            for idx = 0 to 3
+                oldestBox = array.shift(historicalBoxes)
+                if not na(oldestBox)
+                    box.delete(oldestBox)
+                oldestLabel = array.shift(historicalLabels)
+                if not na(oldestLabel)
+                    label.delete(oldestLabel)
+            if array.size(historicalTrueOpenLines) > 0
+                oldestTrueOpenLine = array.shift(historicalTrueOpenLines)
+                if not na(oldestTrueOpenLine)
+                    line.delete(oldestTrueOpenLine)
+            if array.size(historicalTrueOpenLabels) > 0
+                oldestTrueOpenLabel = array.shift(historicalTrueOpenLabels)
+                if not na(oldestTrueOpenLabel)
+                    label.delete(oldestTrueOpenLabel)
 
 isQuarterStart = isNewCycle or quarterIndex != lastQuarterIndex
 
@@ -235,6 +294,25 @@ if showTrueOpen and not na(trueOpenPrice) and not na(trueOpenStartBar)
         label.set_text(trueOpenLabel, trueOpenText)
         label.set_color(trueOpenLabel, colorTrueOpen)
         label.set_textcolor(trueOpenLabel, color.white)
+else if not showTrueOpen
+    if not na(trueOpenLine)
+        line.delete(trueOpenLine)
+        trueOpenLine := na
+    if not na(trueOpenLabel)
+        label.delete(trueOpenLabel)
+        trueOpenLabel := na
+    if array.size(historicalTrueOpenLines) > 0
+        for idx = 0 to array.size(historicalTrueOpenLines) - 1
+            historicalLine = array.get(historicalTrueOpenLines, idx)
+            if not na(historicalLine)
+                line.delete(historicalLine)
+    if array.size(historicalTrueOpenLabels) > 0
+        for idx = 0 to array.size(historicalTrueOpenLabels) - 1
+            historicalTrueOpenLabel = array.get(historicalTrueOpenLabels, idx)
+            if not na(historicalTrueOpenLabel)
+                label.delete(historicalTrueOpenLabel)
+    array.clear(historicalTrueOpenLines)
+    array.clear(historicalTrueOpenLabels)
 else
     if not na(trueOpenLine)
         line.delete(trueOpenLine)
@@ -261,3 +339,4 @@ else if not na(cycleTagLabel)
 lastCycleStartTs := cycleStartTs
 lastQuarterIndex := quarterIndex
 lastCycleName := activeCycle
+lastShowHistoricalCycles := showHistoricalCycles

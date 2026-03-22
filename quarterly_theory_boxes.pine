@@ -1,0 +1,372 @@
+//@version=5
+indicator("Quarterly Theory Boxes | Daily/Weekly/Monthly", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════
+// INPUT SETTINGS
+// ═══════════════════════════════════════════════════════════
+
+// Timeframe Selection
+timeframeMode = input.string("Daily", "Timeframe Mode", options=["Daily", "Weekly", "Monthly"], group="Timeframe")
+
+// Display Options
+showLabels = input.bool(true, "Show Quarter Labels (Q1-Q4)", group="Display Settings")
+showTrueOpen = input.bool(true, "Show True Open (Q2 Open)", group="Display Settings")
+boxTransparency = input.int(85, "Box Transparency", minval=0, maxval=100, group="Display Settings")
+
+// Color Settings
+colorQ1 = input.color(color.new(color.blue, 85), "Q1 - Accumulation", group="Colors")
+colorQ2 = input.color(color.new(color.yellow, 85), "Q2 - Manipulation", group="Colors")
+colorQ3 = input.color(color.new(color.orange, 85), "Q3 - Distribution", group="Colors")
+colorQ4 = input.color(color.new(color.green, 85), "Q4 - Continuation/Reversal", group="Colors")
+colorTrueOpen = input.color(color.new(color.red, 0), "True Open Line", group="Colors")
+trueOpenWidth = input.int(2, "True Open Line Width", minval=1, maxval=5, group="Colors")
+
+// ═══════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════
+
+// Adjust transparency
+adjustTransparency(baseColor) =>
+    color.new(color.rgb(color.r(baseColor), color.g(baseColor), color.b(baseColor)), boxTransparency)
+
+// ═══════════════════════════════════════════════════════════
+// DAILY QUARTERS LOGIC (6-hour boxes)
+// ═══════════════════════════════════════════════════════════
+
+var box q1Box = na
+var box q2Box = na
+var box q3Box = na
+var box q4Box = na
+var line trueOpenLine = na
+var label trueOpenLabel = na
+var float q1High = na
+var float q1Low = na
+var float q2High = na
+var float q2Low = na
+var float q3High = na
+var float q3Low = na
+var float q4High = na
+var float q4Low = na
+var int q1StartBar = na
+var int q2StartBar = na
+var int q3StartBar = na
+var int q4StartBar = na
+var float trueOpenPrice = na
+
+if timeframeMode == "Daily"
+    newDay = ta.change(dayofmonth) != 0
+    currentHour = hour
+
+    // Reset all boxes and variables on new day
+    if newDay
+        if not na(q1Box)
+            box.delete(q1Box)
+        if not na(q2Box)
+            box.delete(q2Box)
+        if not na(q3Box)
+            box.delete(q3Box)
+        if not na(q4Box)
+            box.delete(q4Box)
+        if not na(trueOpenLine)
+            line.delete(trueOpenLine)
+        if not na(trueOpenLabel)
+            label.delete(trueOpenLabel)
+        q1Box := na
+        q2Box := na
+        q3Box := na
+        q4Box := na
+        trueOpenLine := na
+        trueOpenLabel := na
+
+    // Q1: 00:00-06:00 (Asia Session)
+    if newDay and currentHour == 0
+        q1StartBar := bar_index
+        q1High := high
+        q1Low := low
+
+    if currentHour >= 0 and currentHour < 6
+        q1High := math.max(q1High, high)
+        q1Low := math.min(q1Low, low)
+        if not na(q1Box)
+            box.delete(q1Box)
+        q1Box := box.new(q1StartBar, q1High, bar_index, q1Low, bgcolor=adjustTransparency(colorQ1), border_color=colorQ1, border_width=1)
+
+    // Q2: 06:00-12:00 (London Session) - TRUE OPEN
+    if currentHour == 6 and currentHour[1] != 6
+        q2StartBar := bar_index
+        q2High := high
+        q2Low := low
+        trueOpenPrice := open
+
+    if currentHour >= 6 and currentHour < 12
+        q2High := math.max(q2High, high)
+        q2Low := math.min(q2Low, low)
+        if not na(q2Box)
+            box.delete(q2Box)
+        q2Box := box.new(q2StartBar, q2High, bar_index, q2Low, bgcolor=adjustTransparency(colorQ2), border_color=colorQ2, border_width=1)
+
+    // Q3: 12:00-18:00 (NY AM Session)
+    if currentHour == 12 and currentHour[1] != 12
+        q3StartBar := bar_index
+        q3High := high
+        q3Low := low
+
+    if currentHour >= 12 and currentHour < 18
+        q3High := math.max(q3High, high)
+        q3Low := math.min(q3Low, low)
+        if not na(q3Box)
+            box.delete(q3Box)
+        q3Box := box.new(q3StartBar, q3High, bar_index, q3Low, bgcolor=adjustTransparency(colorQ3), border_color=colorQ3, border_width=1)
+
+    // Q4: 18:00-24:00 (NY PM Session)
+    if currentHour == 18 and currentHour[1] != 18
+        q4StartBar := bar_index
+        q4High := high
+        q4Low := low
+
+    if currentHour >= 18 or currentHour < 0
+        q4High := math.max(q4High, high)
+        q4Low := math.min(q4Low, low)
+        if not na(q4Box)
+            box.delete(q4Box)
+        q4Box := box.new(q4StartBar, q4High, bar_index, q4Low, bgcolor=adjustTransparency(colorQ4), border_color=colorQ4, border_width=1)
+
+    // True Open Line (extends to current bar only)
+    if showTrueOpen and not na(trueOpenPrice)
+        if not na(trueOpenLine)
+            line.delete(trueOpenLine)
+        if not na(trueOpenLabel)
+            label.delete(trueOpenLabel)
+        trueOpenLine := line.new(q2StartBar, trueOpenPrice, bar_index, trueOpenPrice, color=colorTrueOpen, width=trueOpenWidth)
+        trueOpenLabel := label.new(q2StartBar, trueOpenPrice, "True Open: " + str.tostring(trueOpenPrice, format.mintick), color=colorTrueOpen, style=label.style_label_left, textcolor=color.white, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════
+// WEEKLY QUARTERS LOGIC (Mon-Thu boxes, Friday excluded)
+// ═══════════════════════════════════════════════════════════
+
+var box wq1Box = na
+var box wq2Box = na
+var box wq3Box = na
+var box wq4Box = na
+var line wTrueOpenLine = na
+var label wTrueOpenLabel = na
+var float wq1High = na
+var float wq1Low = na
+var float wq2High = na
+var float wq2Low = na
+var float wq3High = na
+var float wq3Low = na
+var float wq4High = na
+var float wq4Low = na
+var int wq1StartBar = na
+var int wq2StartBar = na
+var int wq3StartBar = na
+var int wq4StartBar = na
+var float wTrueOpenPrice = na
+
+if timeframeMode == "Weekly"
+    isMonday = dayofweek == dayofweek.monday
+    isTuesday = dayofweek == dayofweek.tuesday
+    isWednesday = dayofweek == dayofweek.wednesday
+    isThursday = dayofweek == dayofweek.thursday
+    newWeek = ta.change(weekofyear) != 0
+
+    // Reset all boxes on new week
+    if newWeek
+        if not na(wq1Box)
+            box.delete(wq1Box)
+        if not na(wq2Box)
+            box.delete(wq2Box)
+        if not na(wq3Box)
+            box.delete(wq3Box)
+        if not na(wq4Box)
+            box.delete(wq4Box)
+        if not na(wTrueOpenLine)
+            line.delete(wTrueOpenLine)
+        if not na(wTrueOpenLabel)
+            label.delete(wTrueOpenLabel)
+        wq1Box := na
+        wq2Box := na
+        wq3Box := na
+        wq4Box := na
+        wTrueOpenLine := na
+        wTrueOpenLabel := na
+
+    // Q1: Monday
+    if isMonday and newWeek
+        wq1StartBar := bar_index
+        wq1High := high
+        wq1Low := low
+
+    if isMonday
+        wq1High := math.max(wq1High, high)
+        wq1Low := math.min(wq1Low, low)
+        if not na(wq1Box)
+            box.delete(wq1Box)
+        wq1Box := box.new(wq1StartBar, wq1High, bar_index, wq1Low, bgcolor=adjustTransparency(colorQ1), border_color=colorQ1, border_width=2)
+
+    // Q2: Tuesday - TRUE WEEK OPEN
+    if isTuesday and not isTuesday[1]
+        wq2StartBar := bar_index
+        wq2High := high
+        wq2Low := low
+        wTrueOpenPrice := open
+
+    if isTuesday
+        wq2High := math.max(wq2High, high)
+        wq2Low := math.min(wq2Low, low)
+        if not na(wq2Box)
+            box.delete(wq2Box)
+        wq2Box := box.new(wq2StartBar, wq2High, bar_index, wq2Low, bgcolor=adjustTransparency(colorQ2), border_color=colorQ2, border_width=2)
+
+    // Q3: Wednesday
+    if isWednesday and not isWednesday[1]
+        wq3StartBar := bar_index
+        wq3High := high
+        wq3Low := low
+
+    if isWednesday
+        wq3High := math.max(wq3High, high)
+        wq3Low := math.min(wq3Low, low)
+        if not na(wq3Box)
+            box.delete(wq3Box)
+        wq3Box := box.new(wq3StartBar, wq3High, bar_index, wq3Low, bgcolor=adjustTransparency(colorQ3), border_color=colorQ3, border_width=2)
+
+    // Q4: Thursday
+    if isThursday and not isThursday[1]
+        wq4StartBar := bar_index
+        wq4High := high
+        wq4Low := low
+
+    if isThursday
+        wq4High := math.max(wq4High, high)
+        wq4Low := math.min(wq4Low, low)
+        if not na(wq4Box)
+            box.delete(wq4Box)
+        wq4Box := box.new(wq4StartBar, wq4High, bar_index, wq4Low, bgcolor=adjustTransparency(colorQ4), border_color=colorQ4, border_width=2)
+
+    // True Week Open Line
+    if showTrueOpen and not na(wTrueOpenPrice)
+        if not na(wTrueOpenLine)
+            line.delete(wTrueOpenLine)
+        if not na(wTrueOpenLabel)
+            label.delete(wTrueOpenLabel)
+        wTrueOpenLine := line.new(wq2StartBar, wTrueOpenPrice, bar_index, wTrueOpenPrice, color=colorTrueOpen, width=trueOpenWidth)
+        wTrueOpenLabel := label.new(wq2StartBar, wTrueOpenPrice, "True Week Open: " + str.tostring(wTrueOpenPrice, format.mintick), color=colorTrueOpen, style=label.style_label_left, textcolor=color.white, size=size.small)
+
+// ═══════════════════════════════════════════════════════════
+// MONTHLY QUARTERS LOGIC (4 weeks boxes)
+// ═══════════════════════════════════════════════════════════
+
+var box mq1Box = na
+var box mq2Box = na
+var box mq3Box = na
+var box mq4Box = na
+var line mTrueOpenLine = na
+var label mTrueOpenLabel = na
+var float mq1High = na
+var float mq1Low = na
+var float mq2High = na
+var float mq2Low = na
+var float mq3High = na
+var float mq3Low = na
+var float mq4High = na
+var float mq4Low = na
+var int mq1StartBar = na
+var int mq2StartBar = na
+var int mq3StartBar = na
+var int mq4StartBar = na
+var float mTrueOpenPrice = na
+var int weekCounter = 0
+
+if timeframeMode == "Monthly"
+    newMonth = ta.change(month) != 0
+    newWeek = ta.change(weekofyear) != 0
+    isMonday = dayofweek == dayofweek.monday
+
+    if newMonth
+        weekCounter := 0
+        // Reset all boxes on new month
+        if not na(mq1Box)
+            box.delete(mq1Box)
+        if not na(mq2Box)
+            box.delete(mq2Box)
+        if not na(mq3Box)
+            box.delete(mq3Box)
+        if not na(mq4Box)
+            box.delete(mq4Box)
+        if not na(mTrueOpenLine)
+            line.delete(mTrueOpenLine)
+        if not na(mTrueOpenLabel)
+            label.delete(mTrueOpenLabel)
+        mq1Box := na
+        mq2Box := na
+        mq3Box := na
+        mq4Box := na
+        mTrueOpenLine := na
+        mTrueOpenLabel := na
+
+    if newWeek and isMonday
+        weekCounter := weekCounter + 1
+
+    // Q1: Week 1 (First full week)
+    if weekCounter == 1 and isMonday and newWeek
+        mq1StartBar := bar_index
+        mq1High := high
+        mq1Low := low
+
+    if weekCounter == 1
+        mq1High := math.max(mq1High, high)
+        mq1Low := math.min(mq1Low, low)
+        if not na(mq1Box)
+            box.delete(mq1Box)
+        mq1Box := box.new(mq1StartBar, mq1High, bar_index, mq1Low, bgcolor=adjustTransparency(colorQ1), border_color=colorQ1, border_width=2)
+
+    // Q2: Week 2 - TRUE MONTH OPEN (second Monday)
+    if weekCounter == 2 and isMonday and newWeek
+        mq2StartBar := bar_index
+        mq2High := high
+        mq2Low := low
+        mTrueOpenPrice := open
+
+    if weekCounter == 2
+        mq2High := math.max(mq2High, high)
+        mq2Low := math.min(mq2Low, low)
+        if not na(mq2Box)
+            box.delete(mq2Box)
+        mq2Box := box.new(mq2StartBar, mq2High, bar_index, mq2Low, bgcolor=adjustTransparency(colorQ2), border_color=colorQ2, border_width=2)
+
+    // Q3: Week 3
+    if weekCounter == 3 and isMonday and newWeek
+        mq3StartBar := bar_index
+        mq3High := high
+        mq3Low := low
+
+    if weekCounter == 3
+        mq3High := math.max(mq3High, high)
+        mq3Low := math.min(mq3Low, low)
+        if not na(mq3Box)
+            box.delete(mq3Box)
+        mq3Box := box.new(mq3StartBar, mq3High, bar_index, mq3Low, bgcolor=adjustTransparency(colorQ3), border_color=colorQ3, border_width=2)
+
+    // Q4: Week 4
+    if weekCounter == 4 and isMonday and newWeek
+        mq4StartBar := bar_index
+        mq4High := high
+        mq4Low := low
+
+    if weekCounter >= 4
+        mq4High := math.max(mq4High, high)
+        mq4Low := math.min(mq4Low, low)
+        if not na(mq4Box)
+            box.delete(mq4Box)
+        mq4Box := box.new(mq4StartBar, mq4High, bar_index, mq4Low, bgcolor=adjustTransparency(colorQ4), border_color=colorQ4, border_width=2)
+
+    // True Month Open Line
+    if showTrueOpen and not na(mTrueOpenPrice)
+        if not na(mTrueOpenLine)
+            line.delete(mTrueOpenLine)
+        if not na(mTrueOpenLabel)
+            label.delete(mTrueOpenLabel)
+        mTrueOpenLine := line.new(mq2StartBar, mTrueOpenPrice, bar_index, mTrueOpenPrice, color=colorTrueOpen, width=trueOpenWidth)
+        mTrueOpenLabel := label.new(mq2StartBar, mTrueOpenPrice, "True Month Open: " + str.tostring(mTrueOpenPrice, format.mintick), color=colorTrueOpen, style=label.style_label_left, textcolor=color.white, size=size.small)

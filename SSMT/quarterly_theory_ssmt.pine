@@ -1,0 +1,383 @@
+//@version=6
+indicator("Quarterly Theory SSMT | Auto NY Cycles", overlay=true, max_lines_count=500, max_labels_count=500)
+
+const string NY_TZ = "America/New_York"
+const int MINUTE_MS = 60 * 1000
+const int COMPARISON_COUNT = 4
+
+cycleModeInput = input.string("Auto", "Cycle", options=["Auto", "22.5m", "90m", "6H", "1D", "1W", "1M"], group="Cycle Settings")
+
+compareWithES = input.bool(true, "Compare With ES", group="Comparison Symbols")
+esSymbol = input.symbol("CME_MINI:ES1!", "ES Symbol", group="Comparison Symbols")
+compareWithYM = input.bool(true, "Compare With YM", group="Comparison Symbols")
+ymSymbol = input.symbol("CBOT_MINI:YM1!", "YM Symbol", group="Comparison Symbols")
+enableCustom1 = input.bool(false, "Enable Custom Symbol 1", group="Comparison Symbols")
+customSymbol1 = input.string("", "Custom Symbol 1", group="Comparison Symbols")
+customName1 = input.string("Custom 1", "Custom Label 1", group="Comparison Symbols")
+enableCustom2 = input.bool(false, "Enable Custom Symbol 2", group="Comparison Symbols")
+customSymbol2 = input.string("", "Custom Symbol 2", group="Comparison Symbols")
+customName2 = input.string("Custom 2", "Custom Label 2", group="Comparison Symbols")
+
+showBearishSSMT = input.bool(true, "Show Bearish SSMT", group="Signal Settings")
+showBullishSSMT = input.bool(true, "Show Bullish SSMT", group="Signal Settings")
+
+showHistoricalSSMT = input.bool(false, "Show Historical SSMT", group="Historical Settings")
+historicalSignalsToKeep = input.int(30, "Historical SSMT To Keep", minval=1, maxval=200, group="Historical Settings")
+
+showLabels = input.bool(true, "Show Labels", group="Display Settings")
+showCycleTag = input.bool(true, "Show Active Cycle Tag", group="Display Settings")
+lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group="Display Settings")
+lineStyleInput = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group="Display Settings")
+bearishColor = input.color(color.red, "Bearish Line Color", group="Display Settings")
+bullishColor = input.color(color.lime, "Bullish Line Color", group="Display Settings")
+
+lineStyleValue() =>
+    lineStyleInput == "Dashed" ? line.style_dashed : lineStyleInput == "Dotted" ? line.style_dotted : line.style_solid
+
+cycleLabel(cycleName) =>
+    cycleName == "22.5m" ? "22.5m Micro" : cycleName == "90m" ? "90m Session" : cycleName == "6H" ? "6H Session" : cycleName == "1D" ? "Daily" : cycleName == "1W" ? "Weekly" : "Monthly"
+
+isLeapYear(y) =>
+    (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+
+daysInMonth(y, m) =>
+    m == 2 ? (isLeapYear(y) ? 29 : 28) : (m == 4 or m == 6 or m == 9 or m == 11 ? 30 : 31)
+
+dayOffsetFromMonday(dow) =>
+    dow == dayofweek.monday ? 0 : dow == dayofweek.tuesday ? 1 : dow == dayofweek.wednesday ? 2 : dow == dayofweek.thursday ? 3 : dow == dayofweek.friday ? 4 : dow == dayofweek.saturday ? 5 : 6
+
+getDailyAnchor(ts) =>
+    currentYear = year(ts, NY_TZ)
+    currentMonth = month(ts, NY_TZ)
+    currentDay = dayofmonth(ts, NY_TZ)
+    todayAnchor = timestamp(NY_TZ, currentYear, currentMonth, currentDay, 18, 0)
+    previousDayAnchor = timestamp(NY_TZ, currentYear, currentMonth, currentDay - 1, 18, 0)
+    ts >= todayAnchor ? todayAnchor : previousDayAnchor
+
+getTimeCycleStart(ts, cycleMs) =>
+    anchor = getDailyAnchor(ts)
+    cycleOffset = int(math.floor((ts - anchor) / cycleMs))
+    anchor + cycleOffset * cycleMs
+
+getTimeCycleQuarter(ts, cycleMs) =>
+    cycleStartTs = getTimeCycleStart(ts, cycleMs)
+    quarterMs = cycleMs / 4.0
+    int(math.min(3, math.floor((ts - cycleStartTs) / quarterMs)))
+
+getWeekStart(ts) =>
+    dow = dayofweek(ts, NY_TZ)
+    currentYear = year(ts, NY_TZ)
+    currentMonth = month(ts, NY_TZ)
+    currentDay = dayofmonth(ts, NY_TZ)
+    currentHour = hour(ts, NY_TZ)
+    daysBack = dow == dayofweek.sunday ? (currentHour >= 18 ? 0 : 7) : dow == dayofweek.monday ? 1 : dow == dayofweek.tuesday ? 2 : dow == dayofweek.wednesday ? 3 : dow == dayofweek.thursday ? 4 : dow == dayofweek.friday ? 5 : 6
+    timestamp(NY_TZ, currentYear, currentMonth, currentDay - daysBack, 18, 0)
+
+getWeekQuarter(ts) =>
+    dow = dayofweek(ts, NY_TZ)
+    currentHour = hour(ts, NY_TZ)
+    (dow == dayofweek.sunday and currentHour >= 18) or dow == dayofweek.monday ? 0 : dow == dayofweek.tuesday ? 1 : dow == dayofweek.wednesday ? 2 : 3
+
+getMonthStart(ts) =>
+    timestamp(NY_TZ, year(ts, NY_TZ), month(ts, NY_TZ), 1, 0, 0)
+
+getMonthQuarter(ts) =>
+    currentYear = year(ts, NY_TZ)
+    currentMonth = month(ts, NY_TZ)
+    currentDay = dayofmonth(ts, NY_TZ)
+    totalDays = daysInMonth(currentYear, currentMonth)
+    int(math.min(3, math.floor((currentDay - 1) * 4 / totalDays)))
+
+getAutoCycle() =>
+    chartSeconds = timeframe.in_seconds()
+    timeframe.isseconds ? "22.5m" : chartSeconds <= 60 ? "90m" : chartSeconds <= 300 ? "6H" : chartSeconds <= 900 ? "1D" : chartSeconds <= 3600 ? "1W" : "1M"
+
+activeCycle = cycleModeInput == "Auto" ? getAutoCycle() : cycleModeInput
+
+int cycleStartTs = na
+int quarterIndex = na
+
+if activeCycle == "22.5m"
+    cycleStartTs := getTimeCycleStart(time, int(22.5 * 60 * 1000))
+    quarterIndex := getTimeCycleQuarter(time, int(22.5 * 60 * 1000))
+else if activeCycle == "90m"
+    cycleStartTs := getTimeCycleStart(time, 90 * MINUTE_MS)
+    quarterIndex := getTimeCycleQuarter(time, 90 * MINUTE_MS)
+else if activeCycle == "6H"
+    cycleStartTs := getTimeCycleStart(time, 6 * 60 * MINUTE_MS)
+    quarterIndex := getTimeCycleQuarter(time, 6 * 60 * MINUTE_MS)
+else if activeCycle == "1D"
+    cycleStartTs := getTimeCycleStart(time, 24 * 60 * MINUTE_MS)
+    quarterIndex := getTimeCycleQuarter(time, 24 * 60 * MINUTE_MS)
+else if activeCycle == "1W"
+    cycleStartTs := getWeekStart(time)
+    quarterIndex := getWeekQuarter(time)
+else
+    cycleStartTs := getMonthStart(time)
+    quarterIndex := getMonthQuarter(time)
+
+var float chartPrevHigh = na
+var float chartPrevLow = na
+var int chartPrevHighBar = na
+var int chartPrevLowBar = na
+var float chartCurrentHigh = na
+var float chartCurrentLow = na
+var int chartCurrentHighBar = na
+var int chartCurrentLowBar = na
+
+var comparisonEnabled = array.new_bool(COMPARISON_COUNT, false)
+var comparisonSymbols = array.new_string(COMPARISON_COUNT, "")
+var comparisonNames = array.new_string(COMPARISON_COUNT, "")
+
+var comparisonPrevHighs = array.new_float(COMPARISON_COUNT, na)
+var comparisonPrevLows = array.new_float(COMPARISON_COUNT, na)
+var comparisonCurrentHighs = array.new_float(COMPARISON_COUNT, na)
+var comparisonCurrentLows = array.new_float(COMPARISON_COUNT, na)
+
+var bearishLines = array.new_line(COMPARISON_COUNT)
+var bearishLabels = array.new_label(COMPARISON_COUNT)
+var bullishLines = array.new_line(COMPARISON_COUNT)
+var bullishLabels = array.new_label(COMPARISON_COUNT)
+
+var historicalLines = array.new_line()
+var historicalLabels = array.new_label()
+var int historicalSignalCount = 0
+
+var int lastCycleStartTs = na
+var int lastQuarterIndex = na
+var string lastCycleName = ""
+var bool lastShowHistoricalSSMT = false
+var label cycleTagLabel = na
+
+array.set(comparisonEnabled, 0, compareWithES)
+array.set(comparisonSymbols, 0, esSymbol)
+array.set(comparisonNames, 0, "ES")
+array.set(comparisonEnabled, 1, compareWithYM)
+array.set(comparisonSymbols, 1, ymSymbol)
+array.set(comparisonNames, 1, "YM")
+array.set(comparisonEnabled, 2, enableCustom1 and str.length(customSymbol1) > 0)
+array.set(comparisonSymbols, 2, customSymbol1)
+array.set(comparisonNames, 2, customName1)
+array.set(comparisonEnabled, 3, enableCustom2 and str.length(customSymbol2) > 0)
+array.set(comparisonSymbols, 3, customSymbol2)
+array.set(comparisonNames, 3, customName2)
+
+cmpHigh0 = compareWithES ? request.security(esSymbol, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpLow0 = compareWithES ? request.security(esSymbol, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpHigh1 = compareWithYM ? request.security(ymSymbol, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpLow1 = compareWithYM ? request.security(ymSymbol, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpHigh2 = enableCustom1 and str.length(customSymbol1) > 0 ? request.security(customSymbol1, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpLow2 = enableCustom1 and str.length(customSymbol1) > 0 ? request.security(customSymbol1, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpHigh3 = enableCustom2 and str.length(customSymbol2) > 0 ? request.security(customSymbol2, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+cmpLow3 = enableCustom2 and str.length(customSymbol2) > 0 ? request.security(customSymbol2, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+
+getComparisonHigh(idx) =>
+    idx == 0 ? cmpHigh0 : idx == 1 ? cmpHigh1 : idx == 2 ? cmpHigh2 : cmpHigh3
+
+getComparisonLow(idx) =>
+    idx == 0 ? cmpLow0 : idx == 1 ? cmpLow1 : idx == 2 ? cmpLow2 : cmpLow3
+
+deleteLiveObjects(lineArray, labelArray, idx) =>
+    activeLine = array.get(lineArray, idx)
+    if not na(activeLine)
+        line.delete(activeLine)
+    activeLabel = array.get(labelArray, idx)
+    if not na(activeLabel)
+        label.delete(activeLabel)
+    array.set(lineArray, idx, na)
+    array.set(labelArray, idx, na)
+
+isNewCycle = barstate.isfirst or activeCycle != lastCycleName or cycleStartTs != lastCycleStartTs
+isQuarterStart = isNewCycle or quarterIndex != lastQuarterIndex
+
+if not showHistoricalSSMT and lastShowHistoricalSSMT
+    if array.size(historicalLines) > 0
+        for idx = 0 to array.size(historicalLines) - 1
+            historicalLine = array.get(historicalLines, idx)
+            if not na(historicalLine)
+                line.delete(historicalLine)
+    if array.size(historicalLabels) > 0
+        for idx = 0 to array.size(historicalLabels) - 1
+            historicalLabel = array.get(historicalLabels, idx)
+            if not na(historicalLabel)
+                label.delete(historicalLabel)
+    array.clear(historicalLines)
+    array.clear(historicalLabels)
+    historicalSignalCount := 0
+
+if isQuarterStart
+    for idx = 0 to COMPARISON_COUNT - 1
+        activeBearishLine = array.get(bearishLines, idx)
+        activeBearishLabel = array.get(bearishLabels, idx)
+        activeBullishLine = array.get(bullishLines, idx)
+        activeBullishLabel = array.get(bullishLabels, idx)
+        if showHistoricalSSMT
+            if not na(activeBearishLine)
+                array.push(historicalLines, activeBearishLine)
+                array.push(historicalLabels, activeBearishLabel)
+                historicalSignalCount := historicalSignalCount + 1
+            if not na(activeBullishLine)
+                array.push(historicalLines, activeBullishLine)
+                array.push(historicalLabels, activeBullishLabel)
+                historicalSignalCount := historicalSignalCount + 1
+        else
+            if not na(activeBearishLine)
+                line.delete(activeBearishLine)
+            if not na(activeBearishLabel)
+                label.delete(activeBearishLabel)
+            if not na(activeBullishLine)
+                line.delete(activeBullishLine)
+            if not na(activeBullishLabel)
+                label.delete(activeBullishLabel)
+        array.set(bearishLines, idx, na)
+        array.set(bearishLabels, idx, na)
+        array.set(bullishLines, idx, na)
+        array.set(bullishLabels, idx, na)
+
+    while historicalSignalCount > historicalSignalsToKeep
+        oldestLine = array.shift(historicalLines)
+        if not na(oldestLine)
+            line.delete(oldestLine)
+        if array.size(historicalLabels) > 0
+            oldestLabel = array.shift(historicalLabels)
+            if not na(oldestLabel)
+                label.delete(oldestLabel)
+        historicalSignalCount := historicalSignalCount - 1
+
+    if not barstate.isfirst
+        chartPrevHigh := chartCurrentHigh
+        chartPrevLow := chartCurrentLow
+        chartPrevHighBar := chartCurrentHighBar
+        chartPrevLowBar := chartCurrentLowBar
+        for idx = 0 to COMPARISON_COUNT - 1
+            array.set(comparisonPrevHighs, idx, array.get(comparisonCurrentHighs, idx))
+            array.set(comparisonPrevLows, idx, array.get(comparisonCurrentLows, idx))
+
+    chartCurrentHigh := high
+    chartCurrentLow := low
+    chartCurrentHighBar := bar_index
+    chartCurrentLowBar := bar_index
+
+    for idx = 0 to COMPARISON_COUNT - 1
+        if array.get(comparisonEnabled, idx)
+            array.set(comparisonCurrentHighs, idx, getComparisonHigh(idx))
+            array.set(comparisonCurrentLows, idx, getComparisonLow(idx))
+        else
+            array.set(comparisonCurrentHighs, idx, na)
+            array.set(comparisonCurrentLows, idx, na)
+
+chartCurrentHigh := na(chartCurrentHigh) ? high : math.max(chartCurrentHigh, high)
+chartCurrentLow := na(chartCurrentLow) ? low : math.min(chartCurrentLow, low)
+if high >= chartCurrentHigh
+    chartCurrentHighBar := bar_index
+if low <= chartCurrentLow
+    chartCurrentLowBar := bar_index
+
+for idx = 0 to COMPARISON_COUNT - 1
+    if array.get(comparisonEnabled, idx)
+        cmpHigh = getComparisonHigh(idx)
+        cmpLow = getComparisonLow(idx)
+        currentCmpHigh = array.get(comparisonCurrentHighs, idx)
+        currentCmpLow = array.get(comparisonCurrentLows, idx)
+        nextCmpHigh = na(cmpHigh) ? currentCmpHigh : na(currentCmpHigh) ? cmpHigh : math.max(currentCmpHigh, cmpHigh)
+        nextCmpLow = na(cmpLow) ? currentCmpLow : na(currentCmpLow) ? cmpLow : math.min(currentCmpLow, cmpLow)
+        array.set(comparisonCurrentHighs, idx, nextCmpHigh)
+        array.set(comparisonCurrentLows, idx, nextCmpLow)
+    else
+        deleteLiveObjects(bearishLines, bearishLabels, idx)
+        deleteLiveObjects(bullishLines, bullishLabels, idx)
+
+lineStyle = lineStyleValue()
+
+for idx = 0 to COMPARISON_COUNT - 1
+    if array.get(comparisonEnabled, idx)
+        comparisonName = array.get(comparisonNames, idx)
+        comparisonPrevHigh = array.get(comparisonPrevHighs, idx)
+        comparisonPrevLow = array.get(comparisonPrevLows, idx)
+        comparisonCurrentHigh = array.get(comparisonCurrentHighs, idx)
+        comparisonCurrentLow = array.get(comparisonCurrentLows, idx)
+
+        bearishCondition = showBearishSSMT and not na(chartPrevHigh) and not na(comparisonPrevHigh) and not na(chartCurrentHigh) and not na(comparisonCurrentHigh) and chartCurrentHigh > chartPrevHigh and comparisonCurrentHigh <= comparisonPrevHigh
+        bullishCondition = showBullishSSMT and not na(chartPrevLow) and not na(comparisonPrevLow) and not na(chartCurrentLow) and not na(comparisonCurrentLow) and chartCurrentLow < chartPrevLow and comparisonCurrentLow >= comparisonPrevLow
+
+        activeBearish = bearishCondition
+        activeBullish = bullishCondition
+
+        bearishText = "Bearish SSMT vs " + comparisonName
+        bullishText = "Bullish SSMT vs " + comparisonName
+
+        currentBearishLine = array.get(bearishLines, idx)
+        currentBearishLabel = array.get(bearishLabels, idx)
+        if activeBearish
+            if na(currentBearishLine)
+                currentBearishLine := line.new(chartPrevHighBar, chartPrevHigh, chartCurrentHighBar, chartCurrentHigh, color=bearishColor, width=lineWidth, style=lineStyle)
+                array.set(bearishLines, idx, currentBearishLine)
+            else
+                line.set_xy1(currentBearishLine, chartPrevHighBar, chartPrevHigh)
+                line.set_xy2(currentBearishLine, chartCurrentHighBar, chartCurrentHigh)
+                line.set_color(currentBearishLine, bearishColor)
+                line.set_width(currentBearishLine, lineWidth)
+                line.set_style(currentBearishLine, lineStyle)
+            if showLabels
+                if na(currentBearishLabel)
+                    currentBearishLabel := label.new(chartCurrentHighBar, chartCurrentHigh, bearishText, style=label.style_label_down, color=bearishColor, textcolor=color.white, size=size.tiny)
+                    array.set(bearishLabels, idx, currentBearishLabel)
+                else
+                    label.set_x(currentBearishLabel, chartCurrentHighBar)
+                    label.set_y(currentBearishLabel, chartCurrentHigh)
+                    label.set_text(currentBearishLabel, bearishText)
+                    label.set_color(currentBearishLabel, bearishColor)
+                    label.set_textcolor(currentBearishLabel, color.white)
+            else if not na(currentBearishLabel)
+                label.delete(currentBearishLabel)
+                array.set(bearishLabels, idx, na)
+        else
+            deleteLiveObjects(bearishLines, bearishLabels, idx)
+
+        currentBullishLine = array.get(bullishLines, idx)
+        currentBullishLabel = array.get(bullishLabels, idx)
+        if activeBullish
+            if na(currentBullishLine)
+                currentBullishLine := line.new(chartPrevLowBar, chartPrevLow, chartCurrentLowBar, chartCurrentLow, color=bullishColor, width=lineWidth, style=lineStyle)
+                array.set(bullishLines, idx, currentBullishLine)
+            else
+                line.set_xy1(currentBullishLine, chartPrevLowBar, chartPrevLow)
+                line.set_xy2(currentBullishLine, chartCurrentLowBar, chartCurrentLow)
+                line.set_color(currentBullishLine, bullishColor)
+                line.set_width(currentBullishLine, lineWidth)
+                line.set_style(currentBullishLine, lineStyle)
+            if showLabels
+                if na(currentBullishLabel)
+                    currentBullishLabel := label.new(chartCurrentLowBar, chartCurrentLow, bullishText, style=label.style_label_up, color=bullishColor, textcolor=color.white, size=size.tiny)
+                    array.set(bullishLabels, idx, currentBullishLabel)
+                else
+                    label.set_x(currentBullishLabel, chartCurrentLowBar)
+                    label.set_y(currentBullishLabel, chartCurrentLow)
+                    label.set_text(currentBullishLabel, bullishText)
+                    label.set_color(currentBullishLabel, bullishColor)
+                    label.set_textcolor(currentBullishLabel, color.white)
+            else if not na(currentBullishLabel)
+                label.delete(currentBullishLabel)
+                array.set(bullishLabels, idx, na)
+        else
+            deleteLiveObjects(bullishLines, bullishLabels, idx)
+
+if showCycleTag
+    cycleTagText = (cycleModeInput == "Auto" ? "Auto -> " : "Manual -> ") + cycleLabel(activeCycle) + " (NY)"
+    cycleTagY = ta.highest(high, 50)
+    if na(cycleTagLabel)
+        cycleTagLabel := label.new(bar_index, cycleTagY, cycleTagText, style=label.style_label_upper_left, color=color.new(color.black, 70), textcolor=color.white, size=size.tiny)
+    else
+        label.set_x(cycleTagLabel, bar_index)
+        label.set_y(cycleTagLabel, cycleTagY)
+        label.set_text(cycleTagLabel, cycleTagText)
+        label.set_color(cycleTagLabel, color.new(color.black, 70))
+        label.set_textcolor(cycleTagLabel, color.white)
+else if not na(cycleTagLabel)
+    label.delete(cycleTagLabel)
+    cycleTagLabel := na
+
+lastCycleStartTs := cycleStartTs
+lastQuarterIndex := quarterIndex
+lastCycleName := activeCycle
+lastShowHistoricalSSMT := showHistoricalSSMT

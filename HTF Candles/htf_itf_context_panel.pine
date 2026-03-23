@@ -1,0 +1,328 @@
+//@version=6
+indicator("HTF / ITF Context Panel", overlay=true, dynamic_requests=true, max_boxes_count=300, max_lines_count=300, max_labels_count=50)
+
+string GROUP_GENERAL = "General"
+string GROUP_STYLE = "Style"
+
+int rightOffsetBars = input.int(4, "Right Offset Bars", minval=1, group=GROUP_GENERAL)
+int groupSpacingBars = input.int(8, "Spacing Between Groups", minval=2, group=GROUP_GENERAL)
+bool showLabels = input.bool(true, "Show Labels", group=GROUP_GENERAL)
+bool showTimeRemaining = input.bool(true, "Show Time Remaining", group=GROUP_GENERAL)
+bool show50PctLevel = input.bool(true, "Show Prior Candle 50%", group=GROUP_GENERAL)
+bool useConfirmedOnly = input.bool(true, "Use Confirmed HTF Candles Only", group=GROUP_GENERAL)
+bool useStrictLadderOnly = input.bool(true, "Use Strict Ladder Only", group=GROUP_GENERAL)
+string labelSizeInput = input.string("small", "Label Size", options=["tiny", "small", "normal", "large"], group=GROUP_GENERAL)
+
+color bullColor = input.color(color.white, "Bullish Candle", group=GROUP_STYLE)
+color bearColor = input.color(color.gray, "Bearish Candle", group=GROUP_STYLE)
+color wickColor = input.color(color.black, "Wick Color", group=GROUP_STYLE)
+color borderColor = input.color(color.black, "Border Color", group=GROUP_STYLE)
+color labelColor = input.color(color.black, "Label Text Color", group=GROUP_STYLE)
+color pctLevelColor = input.color(color.yellow, "50% Level Color", group=GROUP_GENERAL)
+string pctLevelStyleInput = input.string("dotted", "50% Level Style", options=["solid", "dotted", "dashed"], group=GROUP_GENERAL)
+int pctLevelWidth = input.int(1, "50% Level Width", minval=1, maxval=4, group=GROUP_GENERAL)
+
+int itfCandleWidth = input.int(5, "ITF Candle Width", minval=1, maxval=15, group=GROUP_STYLE)
+int htf1CandleWidth = input.int(7, "HTF1 Candle Width", minval=1, maxval=15, group=GROUP_STYLE)
+int htf2CandleWidth = input.int(9, "HTF2 Candle Width", minval=1, maxval=15, group=GROUP_STYLE)
+
+int candlesToShow = 4
+string currentTF = timeframe.period
+
+labelSize = switch labelSizeInput
+    "tiny" => size.tiny
+    "normal" => size.normal
+    "large" => size.large
+    => size.small
+
+lineStyle = switch pctLevelStyleInput
+    "solid" => line.style_solid
+    "dashed" => line.style_dashed
+    => line.style_dotted
+
+var box[] bodies = array.new_box()
+var line[] wicks = array.new_line()
+var line[] midLines = array.new_line()
+var label[] labels = array.new_label()
+
+clearBoxes(box[] items) =>
+    while array.size(items) > 0
+        box.delete(array.pop(items))
+
+clearLines(line[] items) =>
+    while array.size(items) > 0
+        line.delete(array.pop(items))
+
+clearLabels(label[] items) =>
+    while array.size(items) > 0
+        label.delete(array.pop(items))
+
+tfDisplay(string tf) =>
+    switch tf
+        "1" => "1m"
+        "3" => "3m"
+        "5" => "5m"
+        "15" => "15m"
+        "60" => "1H"
+        "240" => "4H"
+        "D" => "1D"
+        "W" => "1W"
+        "M" => "1M"
+        "3M" => "3M"
+        "12M" => "12M"
+        => tf
+
+formatTimeRemaining(int ms) =>
+    int sec = math.round(ms / 1000)
+    int minVal = math.floor(sec / 60)
+    int hr = math.floor(minVal / 60)
+    int day = math.floor(hr / 24)
+    int remainingMin = minVal % 60
+    int remainingHr = hr % 24
+    string minStr = str.tostring(remainingMin)
+    string hrStr = str.tostring(remainingHr)
+    string dayStr = str.tostring(day)
+    if remainingMin < 10 and hr > 0
+        minStr := "0" + minStr
+    day > 0 ? dayStr + "d " + hrStr + "h " + minStr + "m" : hr > 0 ? hrStr + "h " + minStr + "m" : minVal > 0 ? minStr + "m" : "< 1m"
+
+getMappedTfs() =>
+    string chartTfLabel = ""
+    string itfTf = ""
+    string htf1Tf = ""
+    string htf2Tf = ""
+    bool supportedTf = true
+
+    if timeframe.isminutes
+        int mult = timeframe.multiplier
+        if mult == 1
+            chartTfLabel := "1m"
+            itfTf := "3"
+            htf1Tf := "5"
+            htf2Tf := "15"
+        else if mult == 3
+            chartTfLabel := "3m"
+            itfTf := "5"
+            htf1Tf := "15"
+            htf2Tf := "60"
+        else if mult == 5
+            chartTfLabel := "5m"
+            itfTf := "15"
+            htf1Tf := "60"
+            htf2Tf := "240"
+        else if mult == 15
+            chartTfLabel := "15m"
+            itfTf := "60"
+            htf1Tf := "240"
+            htf2Tf := "D"
+        else if mult == 60
+            chartTfLabel := "1H"
+            itfTf := "240"
+            htf1Tf := "D"
+            htf2Tf := "W"
+        else if mult == 240
+            chartTfLabel := "4H"
+            itfTf := "D"
+            htf1Tf := "W"
+            htf2Tf := "M"
+        else
+            supportedTf := false
+    else if timeframe.isdaily and timeframe.multiplier == 1
+        chartTfLabel := "1D"
+        itfTf := "W"
+        htf1Tf := "M"
+        htf2Tf := "3M"
+    else if timeframe.isweekly and timeframe.multiplier == 1
+        chartTfLabel := "1W"
+        itfTf := "M"
+        htf1Tf := "3M"
+        htf2Tf := "12M"
+    else
+        supportedTf := false
+
+    if not useStrictLadderOnly and not supportedTf
+        if timeframe.in_seconds() <= timeframe.in_seconds("1")
+            chartTfLabel := timeframe.period
+            itfTf := "3"
+            htf1Tf := "5"
+            htf2Tf := "15"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("3")
+            chartTfLabel := timeframe.period
+            itfTf := "5"
+            htf1Tf := "15"
+            htf2Tf := "60"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("5")
+            chartTfLabel := timeframe.period
+            itfTf := "15"
+            htf1Tf := "60"
+            htf2Tf := "240"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("15")
+            chartTfLabel := timeframe.period
+            itfTf := "60"
+            htf1Tf := "240"
+            htf2Tf := "D"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("60")
+            chartTfLabel := timeframe.period
+            itfTf := "240"
+            htf1Tf := "D"
+            htf2Tf := "W"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("240")
+            chartTfLabel := timeframe.period
+            itfTf := "D"
+            htf1Tf := "W"
+            htf2Tf := "M"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("1D")
+            chartTfLabel := timeframe.period
+            itfTf := "W"
+            htf1Tf := "M"
+            htf2Tf := "3M"
+            supportedTf := true
+        else if timeframe.in_seconds() <= timeframe.in_seconds("1W")
+            chartTfLabel := timeframe.period
+            itfTf := "M"
+            htf1Tf := "3M"
+            htf2Tf := "12M"
+            supportedTf := true
+
+    [supportedTf, chartTfLabel, itfTf, htf1Tf, htf2Tf]
+
+getTfData(string tf) =>
+    float[] oArr = array.new_float(5, na)
+    float[] hArr = array.new_float(5, na)
+    float[] lArr = array.new_float(5, na)
+    float[] cArr = array.new_float(5, na)
+    int[] tArr = array.new_int(5, na)
+    int nextClose = na
+
+    if useConfirmedOnly
+        [o0, h0, l0, c0, t0] = request.security(syminfo.tickerid, tf, [open[1], high[1], low[1], close[1], time[1]], lookahead=barmerge.lookahead_on)
+        [o1, h1, l1, c1, t1] = request.security(syminfo.tickerid, tf, [open[2], high[2], low[2], close[2], time[2]], lookahead=barmerge.lookahead_on)
+        [o2, h2, l2, c2, t2] = request.security(syminfo.tickerid, tf, [open[3], high[3], low[3], close[3], time[3]], lookahead=barmerge.lookahead_on)
+        [o3, h3, l3, c3, t3] = request.security(syminfo.tickerid, tf, [open[4], high[4], low[4], close[4], time[4]], lookahead=barmerge.lookahead_on)
+        [o4, h4, l4, c4, t4] = request.security(syminfo.tickerid, tf, [open[5], high[5], low[5], close[5], time[5]], lookahead=barmerge.lookahead_on)
+        nextClose := request.security(syminfo.tickerid, tf, time_close[1], lookahead=barmerge.lookahead_on)
+        array.set(oArr, 4, o0)
+        array.set(hArr, 4, h0)
+        array.set(lArr, 4, l0)
+        array.set(cArr, 4, c0)
+        array.set(tArr, 4, int(t0))
+        array.set(oArr, 3, o1)
+        array.set(hArr, 3, h1)
+        array.set(lArr, 3, l1)
+        array.set(cArr, 3, c1)
+        array.set(tArr, 3, int(t1))
+        array.set(oArr, 2, o2)
+        array.set(hArr, 2, h2)
+        array.set(lArr, 2, l2)
+        array.set(cArr, 2, c2)
+        array.set(tArr, 2, int(t2))
+        array.set(oArr, 1, o3)
+        array.set(hArr, 1, h3)
+        array.set(lArr, 1, l3)
+        array.set(cArr, 1, c3)
+        array.set(tArr, 1, int(t3))
+        array.set(oArr, 0, o4)
+        array.set(hArr, 0, h4)
+        array.set(lArr, 0, l4)
+        array.set(cArr, 0, c4)
+        array.set(tArr, 0, int(t4))
+    else
+        [o0, h0, l0, c0, t0] = request.security(syminfo.tickerid, tf, [open, high, low, close, time], lookahead=barmerge.lookahead_off)
+        [o1, h1, l1, c1, t1] = request.security(syminfo.tickerid, tf, [open[1], high[1], low[1], close[1], time[1]], lookahead=barmerge.lookahead_off)
+        [o2, h2, l2, c2, t2] = request.security(syminfo.tickerid, tf, [open[2], high[2], low[2], close[2], time[2]], lookahead=barmerge.lookahead_off)
+        [o3, h3, l3, c3, t3] = request.security(syminfo.tickerid, tf, [open[3], high[3], low[3], close[3], time[3]], lookahead=barmerge.lookahead_off)
+        [o4, h4, l4, c4, t4] = request.security(syminfo.tickerid, tf, [open[4], high[4], low[4], close[4], time[4]], lookahead=barmerge.lookahead_off)
+        nextClose := request.security(syminfo.tickerid, tf, time_close, lookahead=barmerge.lookahead_off)
+        array.set(oArr, 4, o0)
+        array.set(hArr, 4, h0)
+        array.set(lArr, 4, l0)
+        array.set(cArr, 4, c0)
+        array.set(tArr, 4, int(t0))
+        array.set(oArr, 3, o1)
+        array.set(hArr, 3, h1)
+        array.set(lArr, 3, l1)
+        array.set(cArr, 3, c1)
+        array.set(tArr, 3, int(t1))
+        array.set(oArr, 2, o2)
+        array.set(hArr, 2, h2)
+        array.set(lArr, 2, l2)
+        array.set(cArr, 2, c2)
+        array.set(tArr, 2, int(t2))
+        array.set(oArr, 1, o3)
+        array.set(hArr, 1, h3)
+        array.set(lArr, 1, l3)
+        array.set(cArr, 1, c3)
+        array.set(tArr, 1, int(t3))
+        array.set(oArr, 0, o4)
+        array.set(hArr, 0, h4)
+        array.set(lArr, 0, l4)
+        array.set(cArr, 0, c4)
+        array.set(tArr, 0, int(t4))
+
+    [oArr, hArr, lArr, cArr, tArr, nextClose]
+
+drawGroup(string groupName, string tf, int baseOffset, int candleWidth) =>
+    [oArr, hArr, lArr, cArr, tArr, nextClose] = getTfData(tf)
+    int startIdx = 5 - candlesToShow
+    float currentPrice = close
+
+    for i = startIdx to 4
+        int candleX = baseOffset + (i - startIdx) * candleWidth
+        float openPrice = array.get(oArr, i)
+        float highPrice = array.get(hArr, i)
+        float lowPrice = array.get(lArr, i)
+        float closePrice = array.get(cArr, i)
+
+        if not na(openPrice)
+            color candleColor = closePrice >= openPrice ? bullColor : bearColor
+            int halfWidth = math.floor(candleWidth / 2)
+
+            box body = box.new(candleX - halfWidth, math.max(openPrice, closePrice), candleX + halfWidth, math.min(openPrice, closePrice), border_color=borderColor, border_width=1, bgcolor=candleColor, xloc=xloc.bar_index)
+            array.push(bodies, body)
+
+            line upperWick = line.new(candleX, highPrice, candleX, math.max(openPrice, closePrice), color=wickColor, width=1, xloc=xloc.bar_index)
+            line lowerWick = line.new(candleX, lowPrice, candleX, math.min(openPrice, closePrice), color=wickColor, width=1, xloc=xloc.bar_index)
+            array.push(wicks, upperWick)
+            array.push(wicks, lowerWick)
+
+            if i > startIdx and show50PctLevel
+                float prevHigh = array.get(hArr, i - 1)
+                float prevLow = array.get(lArr, i - 1)
+                if not na(prevHigh) and not na(prevLow)
+                    float midPrice = prevLow + (prevHigh - prevLow) * 0.5
+                    int prevX = baseOffset + (i - 1 - startIdx) * candleWidth
+                    line midLine = line.new(prevX - halfWidth - 1, midPrice, prevX + halfWidth + 1, midPrice, color=pctLevelColor, width=pctLevelWidth, style=lineStyle, xloc=xloc.bar_index)
+                    array.push(midLines, midLine)
+
+            if i == 4 and showLabels
+                string labelText = groupName + " " + tfDisplay(tf)
+                if showTimeRemaining and not na(nextClose) and time < nextClose
+                    labelText += " [" + formatTimeRemaining(nextClose - time) + "]"
+                label groupLabel = label.new(candleX + halfWidth + 2, currentPrice, labelText, color=color.new(color.black, 100), style=label.style_label_left, textcolor=labelColor, size=labelSize)
+                array.push(labels, groupLabel)
+
+[supportedTf, chartTfLabel, itfTf, htf1Tf, htf2Tf] = getMappedTfs()
+
+if barstate.islast
+    clearBoxes(bodies)
+    clearLines(wicks)
+    clearLines(midLines)
+    clearLabels(labels)
+
+    if supportedTf
+        int baseOffset = bar_index + rightOffsetBars
+        int itfTotalWidth = candlesToShow * itfCandleWidth
+        int htf1TotalWidth = candlesToShow * htf1CandleWidth
+
+        drawGroup("ITF", itfTf, baseOffset, itfCandleWidth)
+        drawGroup("HTF1", htf1Tf, baseOffset + itfTotalWidth + groupSpacingBars, htf1CandleWidth)
+        drawGroup("HTF2", htf2Tf, baseOffset + itfTotalWidth + groupSpacingBars + htf1TotalWidth + groupSpacingBars, htf2CandleWidth)
+    else
+        label info = label.new(bar_index + rightOffsetBars, close, "Use 1m, 3m, 5m, 15m, 1H, 4H, 1D, or 1W", color=color.new(color.black, 100), style=label.style_label_left, textcolor=color.white, size=size.small)
+        array.push(labels, info)

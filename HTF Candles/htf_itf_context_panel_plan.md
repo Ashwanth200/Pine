@@ -18,32 +18,34 @@ Each row should show the last `4 candles` of that higher timeframe so the trader
 
 The final requirement is:
 
-- show the panel on the `right side`
-- rows should be `stacked vertically`, one above the other
-- always show `3 rows`:
+- show the candles on the `right side` in future bar space
+- always show `3 timeframe groups`:
   - `ITF`
   - `HTF1`
   - `HTF2`
-- each row must show `4 candles`
+- each group must show `4 real candles`
 - timeframe selection should be `automatic` based on the current chart timeframe
 - even on higher charts like `1D` and `1W`, still provide `2 HTFs`
 
-This means the indicator is best treated as a `top-down context dashboard`, not a market-structure engine or entry-signal tool.
+This means the indicator is best treated as a `right-side HTF candle overlay`, not a table dashboard or entry-signal tool.
 
-### Final v1 interpretation
+### Final interpretation
 
 To remove ambiguity, v1 should mean exactly this:
 
 - the user trades on the current chart timeframe
-- the script automatically chooses the next `3 higher-context rows`
-- row 1 = `ITF`
-- row 2 = `HTF1`
-- row 3 = `HTF2`
-- each row displays the `4 most recent confirmed candles`
+- the script automatically chooses the next `3 higher-context groups`
+- group 1 = `ITF`
+- group 2 = `HTF1`
+- group 3 = `HTF2`
+- each group displays `4 candles`
 - the newest candle should appear on the `right`
 - the oldest candle should appear on the `left`
+- all candles should be drawn with real `box` bodies and `line` wicks
+- all candles should sit on actual chart price levels
+- the groups should be separated mainly on the `x-axis`, not stacked in table rows
 
-So the panel reads naturally from left to right as older to newer context.
+So the overlay reads naturally from left to right as older to newer context, with each timeframe group drawn to the right of the live chart.
 
 ---
 
@@ -89,48 +91,58 @@ This is the cleanest way to preserve a consistent 3-row panel.
 
 ## UI Recommendation
 
-Use a `table` instead of chart overlays.
+Use `chart overlays`, not a table.
 
-### Why table is better than overlay candles
+### Why overlay candles are the correct UI
 
-- overlaying multiple HTF candle blocks on an LTF chart becomes cluttered fast
-- a table stays readable across all chart zoom levels
-- a right-side table works well for top-down decision support
-- Pine tables are better for dashboard-style information than labels or boxes
+- the user explicitly wants `real candles`
+- the candles should look like normal chart candles, not cell summaries
+- each timeframe group should be placed in future bar space to the right of the current chart
+- `box.new()` and `line.new()` match the desired visual behavior much better than `table.*`
 
-### Panel layout
+### Overlay layout
 
 Suggested structure:
 
-- column 1: row label (`ITF`, `HTF1`, `HTF2`)
-- column 2: actual timeframe label (`3m`, `1H`, `1D`, etc.)
-- columns 3 to 6: last `4 candles`
+- group 1: `ITF` candles
+- group 2: `HTF1` candles
+- group 3: `HTF2` candles
+- each group contains `4 candles`
+- each group has a label near the newest candle
 
-### Refined table structure
+### Refined visual structure
 
 Recommended final layout for v1:
 
-- optional row 0: compact header such as `HTF Context`
-- row 1: `ITF`
-- row 2: `HTF1`
-- row 3: `HTF2`
+- current chart remains on the left
+- future bar space on the right contains the 3 HTF groups
+- `ITF` starts first
+- `HTF1` starts after `ITF`
+- `HTF2` starts after `HTF1`
 
-Recommended column meaning:
+Recommended x-axis behavior:
 
-- col 0 -> context label
-- col 1 -> timeframe label
-- col 2 -> candle 1 oldest
-- col 3 -> candle 2
-- col 4 -> candle 3
-- col 5 -> candle 4 newest
+- oldest candle on the left within the group
+- newest candle on the right within the group
+- spacing between groups should be configurable
+- candle width per group can be configurable
 
-This gives a fixed `4 x 6` or `5 x 6` table depending on whether the header is enabled.
+### Approximate UI sketch
 
-Each candle cell should visually communicate:
+```text
+current chart candles ...                    future space on right
 
-- bullish vs bearish
-- relative wick/body shape in simplified form
-- optional sweep/inside/outside state later
+                                        ITF              HTF1               HTF2
+                                      |█| | |          |█| |█|           | | |█|
+                                      | | |█|          | | | |           |█| | |
+                                      label            label             label
+```
+
+Important note:
+
+- these are not separate vertical rows anymore
+- they are `3 side-by-side HTF candle groups`
+- they use actual price values, so they can overlap vertically if price ranges are similar
 
 ---
 
@@ -165,66 +177,37 @@ The first version should focus only on making higher-timeframe context visible a
 
 ## Candle Rendering Approach
 
-Because Pine tables cannot draw native candles directly, use a simplified visual encoding.
+Use real drawing objects.
 
-### Recommended v1 rendering
+### Recommended rendering
 
-For each of the 4 candles in a row:
+For each of the 4 candles in a group:
 
-- use one table cell per candle
-- display a compact glyph or text block representing candle shape
-- use background color for direction:
-  - bullish = green family
-  - bearish = red family
-  - neutral/doji = gray family
-- optionally include OHLC relationship markers using symbols or multiline text
+- draw the body with `box.new()`
+- draw upper and lower wicks with `line.new()`
+- use actual OHLC values so candles sit on real price levels
+- draw a label near the newest candle in each group
+- optionally draw the prior candle `50%` level
 
-### Example visual options
+### Current style direction
 
-Possible approaches:
-
-1. `Text glyph candles`
-   - use block characters or slim text layout
-   - simple and low-cost
-
-2. `Body + wick approximation`
-   - encode wick/body balance using 3-line text within the cell
-   - more informative but slightly harder to tune
-
-3. `Color-first dashboard`
-   - body direction only in v1
-   - fastest and most stable initial version
+- one shared style for all 3 groups
+- user can control:
+  - bullish color
+  - bearish color
+  - wick color
+  - border color
+  - label text color
+- user can optionally keep different candle widths per group
 
 ### Recommendation
 
-Start with `color-first + simple glyph` in v1.
+Keep the rendering literal and simple:
 
-That gives fast visual recognition without overcomplicating the first build.
-
-### Refined candle-cell design
-
-Each candle cell should encode these things in v1:
-
-- background color = bullish / bearish / doji
-- text glyph = rough wick/body position
-- tooltip-style meaning through consistency, not too much text
-
-Recommended simplified glyph set:
-
-- strong bull close near high -> `up-close`
-- strong bear close near low -> `down-close`
-- balanced candle / doji -> `neutral`
-
-In Pine table terms, this likely becomes a compact multiline text layout rather than a literal candlestick drawing.
-
-### Best practical v1 compromise
-
-If glyph rendering feels too fragile in TradingView across devices, fall back to this stable version:
-
-- cell background = bull / bear / doji
-- cell text = `B`, `S`, or `D`
-
-That is less visual, but very reliable for the first release.
+- real candle body
+- real wick
+- no glyph fallback in the main version
+- one label per group near the newest candle
 
 ---
 
@@ -237,34 +220,80 @@ For each displayed timeframe, fetch at least:
 - `low`
 - `close`
 
-for the last `4 completed candles`, and optionally the current active candle if you later want live HTF updating.
+for the last `4 candles`, with support for a live current HTF candle mode.
 
-### Recommended v1 behavior
+### Recommended behavior modes
 
-Use the last `4 confirmed candles` for stability.
+The indicator should support 3 modes conceptually:
+
+1. `Confirmed Only`
+   - show 4 closed HTF candles
+   - most stable
+
+2. `Hybrid Live` (recommended)
+   - first 3 candles confirmed
+   - newest 4th candle is the current live forming HTF candle
+   - best balance for execution
+
+3. `Fully Live`
+   - active candle data updates as the current HTF bar changes
+   - useful, but naturally not final until the HTF candle closes
+
+### Recommended default going forward
+
+Use `Hybrid Live` as the recommended live mode.
 
 Why:
 
-- avoids repaint confusion
-- keeps the panel consistent during live bars
-- matches the real need of seeing finished HTF context
+- older context stays stable
+- newest candle reflects current live HTF behavior
+- gives useful intrabar awareness without turning all 4 candles into moving targets
 
-Optional later enhancement:
+### Exact candle set by mode
 
-- toggle between `confirmed only` and `include live current candle`
-
-### Exact candle set for v1
-
-To avoid repaint and interpretation issues, v1 should show:
+Confirmed only:
 
 - candle `4 bars ago`
 - candle `3 bars ago`
 - candle `2 bars ago`
 - candle `1 bar ago`
 
-from each requested higher timeframe.
+Hybrid live:
 
-This means v1 intentionally does `not` show the currently forming higher-timeframe candle.
+- candle `3 bars ago`
+- candle `2 bars ago`
+- candle `1 bar ago`
+- current live candle
+
+Fully live:
+
+- the newest candle updates live
+- earlier candles remain historical in practice, but the focus is the active candle behavior
+
+---
+
+## Live Updating And Accuracy
+
+### What is possible
+
+Live HTF candles are possible in Pine.
+
+This means:
+
+- the newest HTF candle can update as price moves
+- the wick and body can expand or contract while that HTF candle is still forming
+- updates occur when TradingView receives chart updates/ticks
+
+### What is not possible
+
+- the active HTF candle cannot be considered final until the HTF bar closes
+- Pine does not run a separate independent update loop outside TradingView's normal chart update model
+
+### Accurate interpretation
+
+- `confirmed` candles are final
+- `live` candles are accurate to the current moment, but still unfinished
+- this is expected behavior, not an error
 
 ---
 
@@ -285,21 +314,30 @@ Relevant Pine guidance:
 ### Practical implementation direction
 
 - fetch HTF candle series with safe `request.security()` usage
-- use tuples to request multiple fields together where possible
-- update the table on `barstate.islast`
+- use fixed offsets for confirmed candles
+- use `lookahead=barmerge.lookahead_off` for the live current candle
+- update drawing objects on `barstate.islast`
 
 ### Recommended request pattern
 
-For each timeframe row, request all needed values in one call when possible:
+For each timeframe group, request the needed OHLC values explicitly.
 
-- `open[4]`, `high[4]`, `low[4]`, `close[4]`
-- `open[3]`, `high[3]`, `low[3]`, `close[3]`
-- `open[2]`, `high[2]`, `low[2]`, `close[2]`
-- `open[1]`, `high[1]`, `low[1]`, `close[1]`
+Confirmed only mode:
 
-using a tuple expression with `lookahead=barmerge.lookahead_on` only when paired with historical offsets for confirmed values.
+- request confirmed candles with historical offsets
 
-This matches TradingView guidance for non-repainting higher-timeframe access.
+Hybrid live mode:
+
+- first 3 candles use confirmed offsets
+- 4th candle uses live `open/high/low/close`
+
+This keeps the older candles stable while allowing the newest candle to update.
+
+### Recommended default logic
+
+- confirmed candles: safe historical offsets
+- live current candle: `request.security(..., lookahead=barmerge.lookahead_off)`
+- label countdown can use `time_close`
 
 ---
 
@@ -309,66 +347,69 @@ This indicator will rely on several higher-timeframe requests, so performance sh
 
 ### Recommended safeguards
 
-- request OHLC values in tuples to reduce unique `request.security()` calls
 - avoid dynamic looping over arbitrary timeframe lists
 - keep the timeframe ladder fixed
-- update table cells only on the last bar
-- use `var table` so the panel is created once and then updated
+- update overlay objects only on the last bar
+- keep object arrays for cleanup
+- reuse a small fixed drawing footprint: `3 groups x 4 candles`
 
 ### Refined call budget
 
-The clean v1 target should be:
+The clean target should be:
 
-- `3` higher timeframe rows
-- `1` tuple request per row if Pine allows the full packed structure cleanly
-- otherwise `4` series groups per row in a controlled pattern
+- `3` higher timeframe groups
+- `4` candles per group
+- wick + body objects for each candle
+- one label per group
+- optional one midpoint line per historical transition
 
 The design should avoid unnecessary duplicate requests for the same timeframe.
 
 ### Why this matters
 
-Pine has limits around unique `request.*()` calls. A fixed 3-row dashboard with tuple requests is well within a safe architecture if implemented carefully.
+Pine has limits around unique `request.*()` calls and object counts. A fixed `3-group, 4-candle` overlay is reasonable if kept disciplined.
 
 ---
 
 ## Input Design
 
-### Group: Display Settings
+### Group: General
 
-- `Show Header`
-- `Panel Position`
-- `Text Size`
-- `Cell Width Mode`
+- `Right Offset Bars`
+- `Spacing Between Groups`
+- `Show Labels`
+- `Show Time Remaining`
+- `Show Prior Candle 50%`
+- `Use Confirmed HTF Candles Only`
+- later: `Live Mode = Confirmed / Hybrid / Live`
+
+### Group: Style
+
 - `Bull Candle Color`
 - `Bear Candle Color`
-- `Neutral Candle Color`
-- `Header Background`
+- `Wick Color`
 - `Border Color`
-
-### Group: Behavior Settings
-
-- `Use Confirmed HTF Candles Only` -> default `true`
-- `Show Timeframe Labels` -> default `true`
-- `Show Row Labels` -> default `true`
-- `Use Strict Ladder Only` -> default `true`
+- `Label Text Color`
+- `ITF Candle Width`
+- `HTF1 Candle Width`
+- `HTF2 Candle Width`
 
 ### Recommended default values
 
-- `Show Header` -> `true`
-- `Panel Position` -> `Top Right`
-- `Text Size` -> `Small`
-- `Cell Width Mode` -> `Compact`
-- `Use Confirmed HTF Candles Only` -> `true`
-- `Show Timeframe Labels` -> `true`
-- `Show Row Labels` -> `true`
+- `Right Offset Bars` -> `4`
+- `Spacing Between Groups` -> moderate default
+- `Show Labels` -> `true`
+- `Show Time Remaining` -> `true`
+- `Show Prior Candle 50%` -> optional
+- `Use Confirmed HTF Candles Only` -> `false` once hybrid mode is added cleanly
 - `Use Strict Ladder Only` -> `true`
 
 ### Optional future inputs
 
-- `Include Current Live HTF Candle`
+- `Live Mode`
+- `Group Background Boxes`
+- `Show Previous Candle High/Low`
 - `Show Sweep Marker`
-- `Show Inside / Outside Marker`
-- `Compact Mode`
 
 ---
 
@@ -420,7 +461,7 @@ If the chart timeframe is outside the supported ladder:
 
 This is better than hidden remapping because it keeps the tool predictable.
 
-### Step 2: Resolve the 3 display rows
+### Step 2: Resolve the 3 display groups
 
 For the current chart timeframe, determine:
 
@@ -437,40 +478,36 @@ For each resolved timeframe, fetch the last 4 candles of:
 - low
 - close
 
-### Step 4: Convert candles into display state
+and optionally:
 
-For each candle:
+- `time`
+- `time_close`
 
-- determine bullish / bearish / doji
-- determine simple body-to-range impression if used
-- convert into color + text representation
+### Step 4: Build candle groups
 
-### Refined candle classification rules
+For each timeframe group:
 
-Use simple stable rules in v1:
+- determine the x positions for the 4 candles
+- draw the candle bodies using `box.new()`
+- draw upper/lower wicks using `line.new()`
+- draw optional previous-candle midpoint lines
+- attach one label near the newest candle
 
-- `bullish` when `close > open`
-- `bearish` when `close < open`
-- `doji` when `close == open` or body is below a small threshold of total range
+### Step 5: Live update logic
 
-Optional shape grading if added in v1:
+In hybrid live mode:
 
-- strong close near high
-- strong close near low
-- balanced / indecisive
+- candles 1 to 3 are confirmed
+- candle 4 is the active live candle
+- redraw the objects on each chart update while the bar is active
 
-### Step 5: Draw/update the table
+### Step 6: Cleanup and redraw rules
 
-- create the table once using `var table`
-- update all visible cells on `barstate.islast`
-- place the panel at the selected right-side position
+- clear prior objects on `barstate.islast`
+- recreate the small fixed set of objects deterministically
+- keep the object count bounded
 
-### Refined draw rules
-
-- only redraw contents when `barstate.islast`
-- keep the table object persistent
-- clear and repopulate cells deterministically each update
-- avoid creating new tables repeatedly
+This is simpler and more reliable than trying to manage many persistent per-candle mutations in the first version.
 
 ---
 
@@ -481,20 +518,21 @@ The implementation should explicitly handle:
 - unsupported chart timeframes
 - symbols with limited history on higher timeframes
 - missing data on `3M` or `12M`
-- very small screens where table width becomes tight
+- very small screens where future bar space is too narrow
+- live candle overlaps with current chart if right offset is too small
 
 ### Recommendation for missing data
 
-Show `na` or a placeholder cell instead of failing silently.
+Skip missing candles and still keep the label visible.
 
 ### Specific fallback display
 
-Recommended missing-data text:
+Recommended fallback:
 
-- timeframe cell still shows the target TF
-- candle cells show `-`
+- keep the group label
+- do not draw invalid candles
 
-This makes it obvious that the row exists but the symbol lacks enough history.
+This makes it obvious that the timeframe exists but the symbol lacks enough HTF history.
 
 ---
 
@@ -516,13 +554,13 @@ Create a new standalone file such as:
 
 ### Phase 1
 
-Build the base dashboard:
+Build the base overlay:
 
 - timeframe auto mapping
-- 3 rows
+- 3 groups
 - 4 candles each
-- bull/bear color display
-- right-side table
+- real candles with body + wick
+- right-side future-bar placement
 
 ### Phase 1a: Core reliability first
 
@@ -531,17 +569,17 @@ Before visual polish, validate these exact things:
 - timeframe mapping works correctly for all supported chart timeframes
 - `1D` resolves to `1W`, `1M`, `3M`
 - `1W` resolves to `1M`, `3M`, `12M`
-- panel stays stable during realtime updates
+- overlay stays stable during realtime updates
 - unsupported chart timeframes fail gracefully
 
 ### Phase 2
 
-Improve candle readability:
+Add live behavior improvements:
 
-- better glyphs
-- doji styling
-- tighter spacing
-- optional compact mode
+- hybrid live mode
+- time-remaining labels
+- better spacing defaults
+- style cleanup
 
 ### Phase 3
 
@@ -556,7 +594,7 @@ Add lightweight context markers:
 
 Add optional advanced context:
 
-- live current HTF candle mode
+- full live mode toggle
 - alerts later if useful
 - optional structure labels
 
@@ -564,15 +602,15 @@ Add optional advanced context:
 
 ## Final Recommendation
 
-This indicator should be built as a `clean right-side HTF context dashboard` with exactly:
+This indicator should be built as a `clean right-side HTF candle overlay` with exactly:
 
 - `ITF`
 - `HTF1`
 - `HTF2`
-- `4 candles` per row
+- `4 candles` per group
 - `automatic timeframe mapping`
 
-The best architecture is a Pine v6 table-based indicator using safe higher-timeframe requests and a fixed timeframe ladder that extends to `3M` and `12M` so the panel still works well on `1D` and `1W` charts.
+The best architecture is a Pine v6 overlay indicator using `box.new()` and `line.new()` with safe higher-timeframe requests and a fixed timeframe ladder that extends to `3M` and `12M` so the overlay still works on `1D` and `1W` charts.
 
 ---
 
@@ -582,10 +620,10 @@ When building the script, implement in this order:
 
 1. Create timeframe mapping helpers
 2. Resolve `ITF`, `HTF1`, `HTF2` from the current chart timeframe
-3. Fetch last 4 confirmed candles for each row
-4. Build a right-side `table`
-5. Render candle state with color-first visualization
-6. Add display inputs and fallback handling
+3. Fetch candle data for `Confirmed`, `Hybrid`, and `Live` behavior
+4. Draw right-side candle groups using `box.new()` and `line.new()`
+5. Add labels, midpoint lines, and spacing controls
+6. Add fallback handling for unsupported timeframes and missing HTF history
 
 ---
 
@@ -593,13 +631,15 @@ When building the script, implement in this order:
 
 These decisions are now recommended as fixed unless you want to change them before coding:
 
-- use a `table`, not price-chart overlays
-- show exactly `3 rows`: `ITF`, `HTF1`, `HTF2`
-- show exactly `4 confirmed candles` per row
+- use `price-chart overlays`, not a table
+- show exactly `3 groups`: `ITF`, `HTF1`, `HTF2`
+- show exactly `4 candles` per group
 - newest candle is on the far right
 - support `1m`, `3m`, `5m`, `15m`, `1H`, `4H`, `1D`, `1W` chart timeframes in v1
 - map `1D` to `1W`, `1M`, `3M`
 - map `1W` to `1M`, `3M`, `12M`
-- do not include live unconfirmed HTF candle in v1
+- draw candles with `box.new()` bodies and `line.new()` wicks
+- place groups in future bar space to the right of the chart
+- recommended live behavior is `3 confirmed + 1 live current candle`
 - do not add BOS, CHOCH, SMT, or alerts in v1
-- if glyph candles are unstable visually, use `B / S / D` text with directional cell coloring as the fallback
+- use one shared style block for colors unless separate styling is needed later

@@ -1,0 +1,447 @@
+//@version=6
+indicator("Prev Levels + Sessions Refactor", overlay=true, max_lines_count=200, max_labels_count=200)
+
+string GP_GLOBAL = "Global"
+string GP_FILTERS = "Filters"
+string GP_MONTH = "1M"
+string GP_WEEK = "W"
+string GP_DAY = "D"
+string GP_4H = "4H"
+string GP_90M = "90m"
+string GP_1H = "1H"
+string GP_15M = "15m"
+string GP_5M = "5m"
+string GP_RTH = "RTH"
+string GP_ASIA = "Asia"
+string GP_LONDON = "London"
+string GP_NY = "New York"
+
+int maxHistoryBars = input.int(80, "Line Extend Left (bars)", minval=10, maxval=500, group=GP_GLOBAL)
+bool showLabels = input.bool(true, "Show Labels", group=GP_GLOBAL)
+string lineStyleStr = input.string("dotted", "Line Style", options=["solid", "dashed", "dotted"], group=GP_GLOBAL)
+int lineWidth = input.int(1, "Line Width", minval=1, maxval=4, group=GP_GLOBAL)
+float labelOffsetPct = input.float(5.0, "Label Offset % Of Range", minval=0.0, step=0.1, group=GP_GLOBAL) / 100.0
+float collisionSpacingPct = input.float(3.0, "Collision Spacing % Of Range", minval=0.1, step=0.1, group=GP_GLOBAL) / 100.0
+bool useCollisionAvoidance = input.bool(true, "Use Collision Avoidance", group=GP_GLOBAL)
+string labelSizeInput = input.string("small", "Label Size", options=["tiny", "small", "normal", "large"], group=GP_GLOBAL)
+
+bool showHigherTf = input.bool(true, "Show Higher Timeframe Levels", group=GP_FILTERS)
+bool showIntradayTf = input.bool(true, "Show Intraday Levels", group=GP_FILTERS)
+bool showSessionLevels = input.bool(true, "Show Session Levels", group=GP_FILTERS)
+bool showRthLevels = input.bool(true, "Show RTH Levels", group=GP_FILTERS)
+
+bool show1M = input.bool(true, "Show 1M", group=GP_MONTH)
+color col1MHigh = input.color(color.black, "High Color", group=GP_MONTH)
+color col1MLow = input.color(color.black, "Low Color", group=GP_MONTH)
+
+bool showW = input.bool(true, "Show W", group=GP_WEEK)
+color colWHigh = input.color(color.black, "High Color", group=GP_WEEK)
+color colWLow = input.color(color.black, "Low Color", group=GP_WEEK)
+
+bool showD = input.bool(true, "Show D", group=GP_DAY)
+color colDHigh = input.color(color.black, "High Color", group=GP_DAY)
+color colDLow = input.color(color.black, "Low Color", group=GP_DAY)
+
+bool show4H = input.bool(true, "Show 4H", group=GP_4H)
+color col4HHigh = input.color(color.black, "High Color", group=GP_4H)
+color col4HLow = input.color(color.black, "Low Color", group=GP_4H)
+
+bool show90M = input.bool(true, "Show 90m", group=GP_90M)
+color col90MHigh = input.color(color.black, "High Color", group=GP_90M)
+color col90MLow = input.color(color.black, "Low Color", group=GP_90M)
+
+bool show1H = input.bool(true, "Show 1H", group=GP_1H)
+color col1HHigh = input.color(color.black, "High Color", group=GP_1H)
+color col1HLow = input.color(color.black, "Low Color", group=GP_1H)
+
+bool show15M = input.bool(true, "Show 15m", group=GP_15M)
+color col15MHigh = input.color(color.black, "High Color", group=GP_15M)
+color col15MLow = input.color(color.black, "Low Color", group=GP_15M)
+
+bool show5M = input.bool(true, "Show 5m", group=GP_5M)
+color col5MHigh = input.color(color.black, "High Color", group=GP_5M)
+color col5MLow = input.color(color.black, "Low Color", group=GP_5M)
+
+bool showRTH = input.bool(true, "Show RTH", group=GP_RTH)
+string rthSession = input.session("0930-1600", "RTH Session", group=GP_RTH)
+string rthTimezone = input.string("America/New_York", "RTH Timezone", group=GP_RTH)
+color colRthHigh = input.color(color.black, "High Color", group=GP_RTH)
+color colRthLow = input.color(color.black, "Low Color", group=GP_RTH)
+
+bool showAsia = input.bool(true, "Show Asia", group=GP_ASIA)
+string asiaSession = input.session("1900-0000", "Asia Session", group=GP_ASIA)
+string asiaTimezone = input.string("America/New_York", "Asia Timezone", group=GP_ASIA)
+color colAsiaHigh = input.color(color.black, "High Color", group=GP_ASIA)
+color colAsiaLow = input.color(color.black, "Low Color", group=GP_ASIA)
+
+bool showLondon = input.bool(true, "Show London", group=GP_LONDON)
+string londonSession = input.session("0200-0500", "London Session", group=GP_LONDON)
+string londonTimezone = input.string("America/New_York", "London Timezone", group=GP_LONDON)
+color colLondonHigh = input.color(color.black, "High Color", group=GP_LONDON)
+color colLondonLow = input.color(color.black, "Low Color", group=GP_LONDON)
+
+bool showNY = input.bool(true, "Show New York", group=GP_NY)
+string nySession = input.session("0830-1100", "New York Session", group=GP_NY)
+string nyTimezone = input.string("America/New_York", "New York Timezone", group=GP_NY)
+color colNyHigh = input.color(color.black, "High Color", group=GP_NY)
+color colNyLow = input.color(color.black, "Low Color", group=GP_NY)
+
+lineStyle = switch lineStyleStr
+    "solid" => line.style_solid
+    "dotted" => line.style_dotted
+    => line.style_dashed
+
+labelSize = switch labelSizeInput
+    "tiny" => size.tiny
+    "normal" => size.normal
+    "large" => size.large
+    => size.small
+
+float recentRange = math.max(ta.highest(high, 50) - ta.lowest(low, 50), syminfo.mintick * 50)
+float labelOffset = recentRange * labelOffsetPct
+float collisionStep = math.min(math.max(recentRange * collisionSpacingPct, syminfo.mintick * 2), syminfo.mintick * 6)
+
+var float[] placedHighYs = array.new_float()
+var float[] placedLowYs = array.new_float()
+var string[] labelSourceNames = array.new_string()
+var float[] labelPrices = array.new_float()
+var bool[] labelIsHighs = array.new_bool()
+var color[] labelColors = array.new_color()
+var string[] mergedLabelTexts = array.new_string()
+var float[] mergedLabelPrices = array.new_float()
+var bool[] mergedLabelIsHighs = array.new_bool()
+var color[] mergedLabelColors = array.new_color()
+var label[] pooledLabels = array.new_label()
+
+getDeconflictedY(float desiredY, bool isHigh) =>
+    float finalY = desiredY
+    if useCollisionAvoidance
+        float[] target = isHigh ? placedHighYs : placedLowYs
+        int attempts = 0
+        bool clear = false
+        while not clear and attempts < 50
+            clear := true
+            if array.size(target) > 0
+                for i = 0 to array.size(target) - 1
+                    float existingY = array.get(target, i)
+                    if math.abs(finalY - existingY) < collisionStep
+                        finalY += isHigh ? collisionStep : -collisionStep
+                        clear := false
+            attempts += 1
+        array.push(target, finalY)
+    else
+        float[] target = isHigh ? placedHighYs : placedLowYs
+        array.push(target, finalY)
+    finalY
+
+normalizePrice(float price) =>
+    syminfo.mintick > 0 ? math.round(price / syminfo.mintick) * syminfo.mintick : price
+
+addLabelCandidate(string sourceName, bool enabled, float levelPrice, bool isHigh, color levelColor) =>
+    if enabled and not na(levelPrice) and showLabels
+        array.push(labelSourceNames, sourceName)
+        array.push(labelPrices, levelPrice)
+        array.push(labelIsHighs, isHigh)
+        array.push(labelColors, levelColor)
+
+buildMergedLabelText(string sourceNames, bool isHigh) =>
+    sourceNames + (isHigh ? " H" : " L")
+
+mergeLabelCandidates() =>
+    array.clear(mergedLabelTexts)
+    array.clear(mergedLabelPrices)
+    array.clear(mergedLabelIsHighs)
+    array.clear(mergedLabelColors)
+    if array.size(labelSourceNames) > 0
+        for i = 0 to array.size(labelSourceNames) - 1
+            string sourceName = array.get(labelSourceNames, i)
+            float levelPrice = array.get(labelPrices, i)
+            bool isHigh = array.get(labelIsHighs, i)
+            color levelColor = array.get(labelColors, i)
+            float normalizedPrice = normalizePrice(levelPrice)
+            bool merged = false
+            if array.size(mergedLabelTexts) > 0
+                for j = 0 to array.size(mergedLabelTexts) - 1
+                    float existingPrice = array.get(mergedLabelPrices, j)
+                    bool existingIsHigh = array.get(mergedLabelIsHighs, j)
+                    if existingIsHigh == isHigh and math.abs(normalizePrice(existingPrice) - normalizedPrice) <= syminfo.mintick * 0.5
+                        string existingText = array.get(mergedLabelTexts, j)
+                        string baseNames = str.replace(existingText, existingIsHigh ? " H" : " L", "")
+                        array.set(mergedLabelTexts, j, buildMergedLabelText(baseNames + " | " + sourceName, isHigh))
+                        merged := true
+                        break
+            if not merged
+                array.push(mergedLabelTexts, buildMergedLabelText(sourceName, isHigh))
+                array.push(mergedLabelPrices, levelPrice)
+                array.push(mergedLabelIsHighs, isHigh)
+                array.push(mergedLabelColors, levelColor)
+
+renderMergedLabels() =>
+    int mergedCount = array.size(mergedLabelTexts)
+    if mergedCount > 0
+        for i = 0 to mergedCount - 1
+            string labelText = array.get(mergedLabelTexts, i)
+            float levelPrice = array.get(mergedLabelPrices, i)
+            bool isHigh = array.get(mergedLabelIsHighs, i)
+            color levelColor = array.get(mergedLabelColors, i)
+            float baseY = levelPrice
+            float labelY = getDeconflictedY(baseY, isHigh)
+            label pooledLabel = i < array.size(pooledLabels) ? array.get(pooledLabels, i) : na
+            if na(pooledLabel)
+                pooledLabel := label.new(bar_index + 1, labelY, labelText, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, color=na, textcolor=levelColor, size=labelSize)
+                if i < array.size(pooledLabels)
+                    array.set(pooledLabels, i, pooledLabel)
+                else
+                    array.push(pooledLabels, pooledLabel)
+            else
+                label.set_x(pooledLabel, bar_index + 1)
+                label.set_y(pooledLabel, labelY)
+                label.set_text(pooledLabel, labelText)
+                label.set_textcolor(pooledLabel, levelColor)
+                label.set_size(pooledLabel, labelSize)
+    while array.size(pooledLabels) > mergedCount
+        label staleLabel = array.pop(pooledLabels)
+        label.delete(staleLabel)
+
+updateLevelLine(bool enabled, float levelPrice, color levelColor, line existingLine) =>
+    line nextLine = existingLine
+    if enabled and not na(levelPrice)
+        int x1 = bar_index - maxHistoryBars
+        int x2 = bar_index + 1
+        if na(nextLine)
+            nextLine := line.new(x1, levelPrice, x2, levelPrice, xloc=xloc.bar_index, extend=extend.none, color=levelColor, width=lineWidth, style=lineStyle)
+        else
+            line.set_xy1(nextLine, x1, levelPrice)
+            line.set_xy2(nextLine, x2, levelPrice)
+            line.set_color(nextLine, levelColor)
+            line.set_width(nextLine, lineWidth)
+            line.set_style(nextLine, lineStyle)
+    else
+        line.delete(nextLine)
+        nextLine := na
+    nextLine
+
+getPrevTfLevel(string tf, bool isHigh) =>
+    request.security(syminfo.tickerid, tf, isHigh ? high[1] : low[1], lookahead=barmerge.lookahead_on)
+
+bool inRth = not na(time(timeframe.period, rthSession, rthTimezone))
+bool inAsia = not na(time(timeframe.period, asiaSession, asiaTimezone))
+bool inLondon = not na(time(timeframe.period, londonSession, londonTimezone))
+bool inNy = not na(time(timeframe.period, nySession, nyTimezone))
+
+bool rthStart = inRth and not inRth[1]
+bool rthEnd = not inRth and inRth[1]
+bool asiaStart = inAsia and not inAsia[1]
+bool asiaEnd = not inAsia and inAsia[1]
+bool londonStart = inLondon and not inLondon[1]
+bool londonEnd = not inLondon and inLondon[1]
+bool nyStart = inNy and not inNy[1]
+bool nyEnd = not inNy and inNy[1]
+
+var float rthCurrHigh = na
+var float rthCurrLow = na
+var float rthPrevHigh = na
+var float rthPrevLow = na
+var float asiaCurrHigh = na
+var float asiaCurrLow = na
+var float asiaPrevHigh = na
+var float asiaPrevLow = na
+var float londonCurrHigh = na
+var float londonCurrLow = na
+var float londonPrevHigh = na
+var float londonPrevLow = na
+var float nyCurrHigh = na
+var float nyCurrLow = na
+var float nyPrevHigh = na
+var float nyPrevLow = na
+
+if rthStart
+    rthCurrHigh := high
+    rthCurrLow := low
+else if inRth
+    rthCurrHigh := na(rthCurrHigh) ? high : math.max(rthCurrHigh, high)
+    rthCurrLow := na(rthCurrLow) ? low : math.min(rthCurrLow, low)
+if rthEnd
+    rthPrevHigh := rthCurrHigh
+    rthPrevLow := rthCurrLow
+
+if asiaStart
+    asiaCurrHigh := high
+    asiaCurrLow := low
+else if inAsia
+    asiaCurrHigh := na(asiaCurrHigh) ? high : math.max(asiaCurrHigh, high)
+    asiaCurrLow := na(asiaCurrLow) ? low : math.min(asiaCurrLow, low)
+if asiaEnd
+    asiaPrevHigh := asiaCurrHigh
+    asiaPrevLow := asiaCurrLow
+
+if londonStart
+    londonCurrHigh := high
+    londonCurrLow := low
+else if inLondon
+    londonCurrHigh := na(londonCurrHigh) ? high : math.max(londonCurrHigh, high)
+    londonCurrLow := na(londonCurrLow) ? low : math.min(londonCurrLow, low)
+if londonEnd
+    londonPrevHigh := londonCurrHigh
+    londonPrevLow := londonCurrLow
+
+if nyStart
+    nyCurrHigh := high
+    nyCurrLow := low
+else if inNy
+    nyCurrHigh := na(nyCurrHigh) ? high : math.max(nyCurrHigh, high)
+    nyCurrLow := na(nyCurrLow) ? low : math.min(nyCurrLow, low)
+if nyEnd
+    nyPrevHigh := nyCurrHigh
+    nyPrevLow := nyCurrLow
+
+var line l1MHigh = na
+var line l1MLow = na
+var label lb1MHigh = na
+var label lb1MLow = na
+var line lWHigh = na
+var line lWLow = na
+var label lbWHigh = na
+var label lbWLow = na
+var line lDHigh = na
+var line lDLow = na
+var label lbDHigh = na
+var label lbDLow = na
+var line l4HHigh = na
+var line l4HLow = na
+var label lb4HHigh = na
+var label lb4HLow = na
+var line l90MHigh = na
+var line l90MLow = na
+var label lb90MHigh = na
+var label lb90MLow = na
+var line l1HHigh = na
+var line l1HLow = na
+var label lb1HHigh = na
+var label lb1HLow = na
+var line l15MHigh = na
+var line l15MLow = na
+var label lb15MHigh = na
+var label lb15MLow = na
+var line l5MHigh = na
+var line l5MLow = na
+var label lb5MHigh = na
+var label lb5MLow = na
+var line lRthHigh = na
+var line lRthLow = na
+var label lbRthHigh = na
+var label lbRthLow = na
+var line lAsiaHigh = na
+var line lAsiaLow = na
+var label lbAsiaHigh = na
+var label lbAsiaLow = na
+var line lLondonHigh = na
+var line lLondonLow = na
+var label lbLondonHigh = na
+var label lbLondonLow = na
+var line lNyHigh = na
+var line lNyLow = na
+var label lbNyHigh = na
+var label lbNyLow = na
+
+bool enable1M = showHigherTf and show1M and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("1M")
+bool enableW = showHigherTf and showW and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("1W")
+bool enableD = showHigherTf and showD and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("1D")
+bool enable4H = showIntradayTf and show4H and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("240")
+bool enable90M = showIntradayTf and show90M and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("90")
+bool enable1H = showIntradayTf and show1H and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("60")
+bool enable15M = showIntradayTf and show15M and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("15")
+bool enable5M = showIntradayTf and show5M and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("5")
+
+float prev1MHigh = enable1M ? getPrevTfLevel("M", true) : na
+float prev1MLow = enable1M ? getPrevTfLevel("M", false) : na
+float prevWHigh = enableW ? getPrevTfLevel("W", true) : na
+float prevWLow = enableW ? getPrevTfLevel("W", false) : na
+float prevDHigh = enableD ? getPrevTfLevel("D", true) : na
+float prevDLow = enableD ? getPrevTfLevel("D", false) : na
+float prev4HHigh = enable4H ? getPrevTfLevel("240", true) : na
+float prev4HLow = enable4H ? getPrevTfLevel("240", false) : na
+float prev90MHigh = enable90M ? getPrevTfLevel("90", true) : na
+float prev90MLow = enable90M ? getPrevTfLevel("90", false) : na
+float prev1HHigh = enable1H ? getPrevTfLevel("60", true) : na
+float prev1HLow = enable1H ? getPrevTfLevel("60", false) : na
+float prev15MHigh = enable15M ? getPrevTfLevel("15", true) : na
+float prev15MLow = enable15M ? getPrevTfLevel("15", false) : na
+float prev5MHigh = enable5M ? getPrevTfLevel("5", true) : na
+float prev5MLow = enable5M ? getPrevTfLevel("5", false) : na
+
+if barstate.islast
+    array.clear(placedHighYs)
+    array.clear(placedLowYs)
+    array.clear(labelSourceNames)
+    array.clear(labelPrices)
+    array.clear(labelIsHighs)
+    array.clear(labelColors)
+
+    l1MHigh := updateLevelLine(enable1M, prev1MHigh, col1MHigh, l1MHigh)
+    addLabelCandidate("1M", enable1M, prev1MHigh, true, col1MHigh)
+    l1MLow := updateLevelLine(enable1M, prev1MLow, col1MLow, l1MLow)
+    addLabelCandidate("1M", enable1M, prev1MLow, false, col1MLow)
+    lWHigh := updateLevelLine(enableW, prevWHigh, colWHigh, lWHigh)
+    addLabelCandidate("W", enableW, prevWHigh, true, colWHigh)
+    lWLow := updateLevelLine(enableW, prevWLow, colWLow, lWLow)
+    addLabelCandidate("W", enableW, prevWLow, false, colWLow)
+    lDHigh := updateLevelLine(enableD, prevDHigh, colDHigh, lDHigh)
+    addLabelCandidate("D", enableD, prevDHigh, true, colDHigh)
+    lDLow := updateLevelLine(enableD, prevDLow, colDLow, lDLow)
+    addLabelCandidate("D", enableD, prevDLow, false, colDLow)
+    l4HHigh := updateLevelLine(enable4H, prev4HHigh, col4HHigh, l4HHigh)
+    addLabelCandidate("4H", enable4H, prev4HHigh, true, col4HHigh)
+    l4HLow := updateLevelLine(enable4H, prev4HLow, col4HLow, l4HLow)
+    addLabelCandidate("4H", enable4H, prev4HLow, false, col4HLow)
+    l90MHigh := updateLevelLine(enable90M, prev90MHigh, col90MHigh, l90MHigh)
+    addLabelCandidate("90m", enable90M, prev90MHigh, true, col90MHigh)
+    l90MLow := updateLevelLine(enable90M, prev90MLow, col90MLow, l90MLow)
+    addLabelCandidate("90m", enable90M, prev90MLow, false, col90MLow)
+    l1HHigh := updateLevelLine(enable1H, prev1HHigh, col1HHigh, l1HHigh)
+    addLabelCandidate("1H", enable1H, prev1HHigh, true, col1HHigh)
+    l1HLow := updateLevelLine(enable1H, prev1HLow, col1HLow, l1HLow)
+    addLabelCandidate("1H", enable1H, prev1HLow, false, col1HLow)
+    l15MHigh := updateLevelLine(enable15M, prev15MHigh, col15MHigh, l15MHigh)
+    addLabelCandidate("15m", enable15M, prev15MHigh, true, col15MHigh)
+    l15MLow := updateLevelLine(enable15M, prev15MLow, col15MLow, l15MLow)
+    addLabelCandidate("15m", enable15M, prev15MLow, false, col15MLow)
+    l5MHigh := updateLevelLine(enable5M, prev5MHigh, col5MHigh, l5MHigh)
+    addLabelCandidate("5m", enable5M, prev5MHigh, true, col5MHigh)
+    l5MLow := updateLevelLine(enable5M, prev5MLow, col5MLow, l5MLow)
+    addLabelCandidate("5m", enable5M, prev5MLow, false, col5MLow)
+
+    bool enableRthHigh = showRthLevels and showRTH
+    bool enableRthLow = showRthLevels and showRTH
+    lRthHigh := updateLevelLine(enableRthHigh, rthPrevHigh, colRthHigh, lRthHigh)
+    addLabelCandidate("RTH", enableRthHigh, rthPrevHigh, true, colRthHigh)
+    lRthLow := updateLevelLine(enableRthLow, rthPrevLow, colRthLow, lRthLow)
+    addLabelCandidate("RTH", enableRthLow, rthPrevLow, false, colRthLow)
+
+    bool enableAsiaHigh = showSessionLevels and showAsia
+    bool enableAsiaLow = showSessionLevels and showAsia
+    lAsiaHigh := updateLevelLine(enableAsiaHigh, asiaPrevHigh, colAsiaHigh, lAsiaHigh)
+    addLabelCandidate("Asia", enableAsiaHigh, asiaPrevHigh, true, colAsiaHigh)
+    lAsiaLow := updateLevelLine(enableAsiaLow, asiaPrevLow, colAsiaLow, lAsiaLow)
+    addLabelCandidate("Asia", enableAsiaLow, asiaPrevLow, false, colAsiaLow)
+
+    bool enableLondonHigh = showSessionLevels and showLondon
+    bool enableLondonLow = showSessionLevels and showLondon
+    lLondonHigh := updateLevelLine(enableLondonHigh, londonPrevHigh, colLondonHigh, lLondonHigh)
+    addLabelCandidate("London", enableLondonHigh, londonPrevHigh, true, colLondonHigh)
+    lLondonLow := updateLevelLine(enableLondonLow, londonPrevLow, colLondonLow, lLondonLow)
+    addLabelCandidate("London", enableLondonLow, londonPrevLow, false, colLondonLow)
+
+    bool enableNyHigh = showSessionLevels and showNY
+    bool enableNyLow = showSessionLevels and showNY
+    lNyHigh := updateLevelLine(enableNyHigh, nyPrevHigh, colNyHigh, lNyHigh)
+    addLabelCandidate("NY", enableNyHigh, nyPrevHigh, true, colNyHigh)
+    lNyLow := updateLevelLine(enableNyLow, nyPrevLow, colNyLow, lNyLow)
+    addLabelCandidate("NY", enableNyLow, nyPrevLow, false, colNyLow)
+
+    mergeLabelCandidates()
+    renderMergedLabels()
+else
+    while array.size(pooledLabels) > 0
+        label staleLabel = array.pop(pooledLabels)
+        label.delete(staleLabel)

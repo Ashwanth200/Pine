@@ -4,38 +4,149 @@ indicator("Quarterly Theory SSMT | Auto NY Cycles", overlay=true, max_lines_coun
 const string NY_TZ = "America/New_York"
 const int MINUTE_MS = 60 * 1000
 const int COMPARISON_COUNT = 4
+const string REL_POSITIVE = "positive"
+const string REL_INVERSE = "inverse"
 
-cycleModeInput = input.string("Auto", "Cycle", options=["Auto", "22.5m", "90m", "6H", "1D", "1W", "1M"], group="Cycle Settings")
+cycleModeInput = input.string("Auto", "Cycle", options=["Auto", "22.5m", "90m", "6H", "1D", "1W", "1M"], group="Cycle")
 
-compareWithES = input.bool(true, "Compare With ES", group="Comparison Symbols")
-esSymbol = input.symbol("CME_MINI:ES1!", "ES Symbol", group="Comparison Symbols")
-compareWithYM = input.bool(true, "Compare With YM", group="Comparison Symbols")
-ymSymbol = input.symbol("CBOT_MINI:YM1!", "YM Symbol", group="Comparison Symbols")
-enableCustom1 = input.bool(false, "Enable Custom Symbol 1", group="Comparison Symbols")
-customSymbol1 = input.string("", "Custom Symbol 1", group="Comparison Symbols")
-customName1 = input.string("Custom 1", "Custom Label 1", group="Comparison Symbols")
-enableCustom2 = input.bool(false, "Enable Custom Symbol 2", group="Comparison Symbols")
-customSymbol2 = input.string("", "Custom Symbol 2", group="Comparison Symbols")
-customName2 = input.string("Custom 2", "Custom Label 2", group="Comparison Symbols")
+comparisonMode = input.string("Auto", "Comparison Mode", options=["Auto", "Manual"], group="Comparison")
 
-showBearishSSMT = input.bool(true, "Show Bearish SSMT", group="Signal Settings")
-showBullishSSMT = input.bool(true, "Show Bullish SSMT", group="Signal Settings")
+nqAutoSymbol = input.symbol("CME_MINI:NQ1!", "NQ", group="Auto Map Symbols")
+esAutoSymbol = input.symbol("CME_MINI:ES1!", "ES", group="Auto Map Symbols")
+ymAutoSymbol = input.symbol("CBOT_MINI:YM1!", "YM", group="Auto Map Symbols")
+mnqAutoSymbol = input.symbol("CME_MINI:MNQ1!", "MNQ", group="Auto Map Symbols")
+mesAutoSymbol = input.symbol("CME_MINI:MES1!", "MES", group="Auto Map Symbols")
+mymAutoSymbol = input.symbol("CBOT_MINI:MYM1!", "MYM", group="Auto Map Symbols")
+eurusdAutoSymbol = input.symbol("OANDA:EURUSD", "EURUSD", group="Auto Map Symbols")
+gbpusdAutoSymbol = input.symbol("OANDA:GBPUSD", "GBPUSD", group="Auto Map Symbols")
+audusdAutoSymbol = input.symbol("OANDA:AUDUSD", "AUDUSD", group="Auto Map Symbols")
+nzdusdAutoSymbol = input.symbol("OANDA:NZDUSD", "NZDUSD", group="Auto Map Symbols")
+usdchfAutoSymbol = input.symbol("OANDA:USDCHF", "USDCHF", group="Auto Map Symbols")
+usdjpyAutoSymbol = input.symbol("OANDA:USDJPY", "USDJPY", group="Auto Map Symbols")
+usdcadAutoSymbol = input.symbol("OANDA:USDCAD", "USDCAD", group="Auto Map Symbols")
+xauusdAutoSymbol = input.symbol("OANDA:XAUUSD", "XAUUSD", group="Auto Map Symbols")
+xagusdAutoSymbol = input.symbol("OANDA:XAGUSD", "XAGUSD", group="Auto Map Symbols")
+dxyAutoSymbol = input.symbol("TVC:DXY", "DXY", group="Auto Map Symbols")
 
-showHistoricalSSMT = input.bool(false, "Show Historical SSMT", group="Historical Settings")
-historicalSignalsToKeep = input.int(30, "Historical SSMT To Keep", minval=1, maxval=200, group="Historical Settings")
+compareWithES = input.bool(true, "Enable ES", group="Manual Symbols")
+esSymbol = input.symbol("CME_MINI:ES1!", "ES Symbol", group="Manual Symbols")
+compareWithYM = input.bool(true, "Enable YM", group="Manual Symbols")
+ymSymbol = input.symbol("CBOT_MINI:YM1!", "YM Symbol", group="Manual Symbols")
+enableCustom1 = input.bool(false, "Enable Custom 1", group="Manual Symbols")
+customSymbol1 = input.string("", "Custom 1 Symbol", group="Manual Symbols")
+customName1 = input.string("Custom 1", "Custom 1 Label", group="Manual Symbols")
+enableCustom2 = input.bool(false, "Enable Custom 2", group="Manual Symbols")
+customSymbol2 = input.string("", "Custom 2 Symbol", group="Manual Symbols")
+customName2 = input.string("Custom 2", "Custom 2 Label", group="Manual Symbols")
 
-showLabels = input.bool(true, "Show Labels", group="Display Settings")
-showCycleTag = input.bool(true, "Show Active Cycle Tag", group="Display Settings")
-lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group="Display Settings")
-lineStyleInput = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group="Display Settings")
-bearishColor = input.color(color.red, "Bearish Line Color", group="Display Settings")
-bullishColor = input.color(color.lime, "Bullish Line Color", group="Display Settings")
+showBearishSSMT = input.bool(true, "Show Bearish SSMT", group="Signals")
+showBullishSSMT = input.bool(true, "Show Bullish SSMT", group="Signals")
+
+showHistoricalSSMT = input.bool(false, "Show Historical SSMT", group="History")
+historicalSignalsToKeep = input.int(30, "Historical SSMT To Keep", minval=1, maxval=200, group="History")
+
+showLabels = input.bool(true, "Show Labels", group="Display")
+showCycleTag = input.bool(true, "Show Cycle Tag", group="Display")
+lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group="Display")
+lineStyleInput = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group="Display")
+bearishColor = input.color(color.red, "Bearish Line Color", group="Display")
+bullishColor = input.color(color.lime, "Bullish Line Color", group="Display")
+
+var comparisonEnabled = array.new_bool(COMPARISON_COUNT, false)
+var comparisonSymbols = array.new_string(COMPARISON_COUNT, "")
+var comparisonNames = array.new_string(COMPARISON_COUNT, "")
+var comparisonRelations = array.new_string(COMPARISON_COUNT, REL_POSITIVE)
 
 lineStyleValue() =>
     lineStyleInput == "Dashed" ? line.style_dashed : lineStyleInput == "Dotted" ? line.style_dotted : line.style_solid
 
 cycleLabel(cycleName) =>
     cycleName == "22.5m" ? "22.5m Micro" : cycleName == "90m" ? "90m Session" : cycleName == "6H" ? "6H Session" : cycleName == "1D" ? "Daily" : cycleName == "1W" ? "Weekly" : "Monthly"
+
+getChartKey() =>
+    syminfo.type == "futures" ? syminfo.root : syminfo.ticker
+
+getAutoSymbol(symbolKey) =>
+    switch symbolKey
+        "NQ" => nqAutoSymbol
+        "ES" => esAutoSymbol
+        "YM" => ymAutoSymbol
+        "MNQ" => mnqAutoSymbol
+        "MES" => mesAutoSymbol
+        "MYM" => mymAutoSymbol
+        "EURUSD" => eurusdAutoSymbol
+        "GBPUSD" => gbpusdAutoSymbol
+        "AUDUSD" => audusdAutoSymbol
+        "NZDUSD" => nzdusdAutoSymbol
+        "USDCHF" => usdchfAutoSymbol
+        "USDJPY" => usdjpyAutoSymbol
+        "USDCAD" => usdcadAutoSymbol
+        "XAUUSD" => xauusdAutoSymbol
+        "XAGUSD" => xagusdAutoSymbol
+        "DXY" => dxyAutoSymbol
+        => ""
+
+setComparisonSlot(idx, desiredEnabled, symbol, name, relation) =>
+    slotEnabled = desiredEnabled and str.length(symbol) > 0
+    array.set(comparisonEnabled, idx, slotEnabled)
+    array.set(comparisonSymbols, idx, slotEnabled ? symbol : "")
+    array.set(comparisonNames, idx, slotEnabled ? name : "")
+    array.set(comparisonRelations, idx, slotEnabled ? relation : REL_POSITIVE)
+
+clearComparisonSlots() =>
+    for idx = 0 to COMPARISON_COUNT - 1
+        setComparisonSlot(idx, false, "", "", REL_POSITIVE)
+
+applyManualComparisons() =>
+    setComparisonSlot(0, compareWithES, esSymbol, "ES", REL_POSITIVE)
+    setComparisonSlot(1, compareWithYM, ymSymbol, "YM", REL_POSITIVE)
+    setComparisonSlot(2, enableCustom1 and str.length(customSymbol1) > 0, customSymbol1, customName1, REL_POSITIVE)
+    setComparisonSlot(3, enableCustom2 and str.length(customSymbol2) > 0, customSymbol2, customName2, REL_POSITIVE)
+
+applyAutoComparisons(chartKey) =>
+    clearComparisonSlots()
+    switch chartKey
+        "NQ" =>
+            setComparisonSlot(0, true, getAutoSymbol("ES"), "ES", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("YM"), "YM", REL_POSITIVE)
+        "ES" =>
+            setComparisonSlot(0, true, getAutoSymbol("NQ"), "NQ", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("YM"), "YM", REL_POSITIVE)
+        "YM" =>
+            setComparisonSlot(0, true, getAutoSymbol("NQ"), "NQ", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("ES"), "ES", REL_POSITIVE)
+        "MNQ" =>
+            setComparisonSlot(0, true, getAutoSymbol("MES"), "MES", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("MYM"), "MYM", REL_POSITIVE)
+        "MES" =>
+            setComparisonSlot(0, true, getAutoSymbol("MNQ"), "MNQ", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("MYM"), "MYM", REL_POSITIVE)
+        "MYM" =>
+            setComparisonSlot(0, true, getAutoSymbol("MNQ"), "MNQ", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("MES"), "MES", REL_POSITIVE)
+        "EURUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("GBPUSD"), "GBPUSD", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("DXY"), "DXY", REL_INVERSE)
+        "GBPUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("EURUSD"), "EURUSD", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("DXY"), "DXY", REL_INVERSE)
+        "AUDUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("NZDUSD"), "NZDUSD", REL_POSITIVE)
+        "NZDUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("AUDUSD"), "AUDUSD", REL_POSITIVE)
+        "USDCHF" =>
+            setComparisonSlot(0, true, getAutoSymbol("USDJPY"), "USDJPY", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("USDCAD"), "USDCAD", REL_POSITIVE)
+        "USDJPY" =>
+            setComparisonSlot(0, true, getAutoSymbol("USDCHF"), "USDCHF", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("USDCAD"), "USDCAD", REL_POSITIVE)
+        "USDCAD" =>
+            setComparisonSlot(0, true, getAutoSymbol("USDCHF"), "USDCHF", REL_POSITIVE)
+            setComparisonSlot(1, true, getAutoSymbol("USDJPY"), "USDJPY", REL_POSITIVE)
+        "XAUUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("XAGUSD"), "XAGUSD", REL_POSITIVE)
+        "XAGUSD" =>
+            setComparisonSlot(0, true, getAutoSymbol("XAUUSD"), "XAUUSD", REL_POSITIVE)
 
 isLeapYear(y) =>
     (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
@@ -125,14 +236,12 @@ var float chartCurrentLow = na
 var int chartCurrentHighBar = na
 var int chartCurrentLowBar = na
 
-var comparisonEnabled = array.new_bool(COMPARISON_COUNT, false)
-var comparisonSymbols = array.new_string(COMPARISON_COUNT, "")
-var comparisonNames = array.new_string(COMPARISON_COUNT, "")
-
 var comparisonPrevHighs = array.new_float(COMPARISON_COUNT, na)
 var comparisonPrevLows = array.new_float(COMPARISON_COUNT, na)
 var comparisonCurrentHighs = array.new_float(COMPARISON_COUNT, na)
 var comparisonCurrentLows = array.new_float(COMPARISON_COUNT, na)
+var comparisonBarHighs = array.new_float(COMPARISON_COUNT, na)
+var comparisonBarLows = array.new_float(COMPARISON_COUNT, na)
 
 var bearishLines = array.new_line(COMPARISON_COUNT)
 var bearishLabels = array.new_label(COMPARISON_COUNT)
@@ -149,33 +258,22 @@ var string lastCycleName = ""
 var bool lastShowHistoricalSSMT = false
 var label cycleTagLabel = na
 
-array.set(comparisonEnabled, 0, compareWithES)
-array.set(comparisonSymbols, 0, esSymbol)
-array.set(comparisonNames, 0, "ES")
-array.set(comparisonEnabled, 1, compareWithYM)
-array.set(comparisonSymbols, 1, ymSymbol)
-array.set(comparisonNames, 1, "YM")
-array.set(comparisonEnabled, 2, enableCustom1 and str.length(customSymbol1) > 0)
-array.set(comparisonSymbols, 2, customSymbol1)
-array.set(comparisonNames, 2, customName1)
-array.set(comparisonEnabled, 3, enableCustom2 and str.length(customSymbol2) > 0)
-array.set(comparisonSymbols, 3, customSymbol2)
-array.set(comparisonNames, 3, customName2)
+chartKey = getChartKey()
 
-cmpHigh0 = compareWithES ? request.security(esSymbol, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpLow0 = compareWithES ? request.security(esSymbol, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpHigh1 = compareWithYM ? request.security(ymSymbol, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpLow1 = compareWithYM ? request.security(ymSymbol, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpHigh2 = enableCustom1 and str.length(customSymbol1) > 0 ? request.security(customSymbol1, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpLow2 = enableCustom1 and str.length(customSymbol1) > 0 ? request.security(customSymbol1, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpHigh3 = enableCustom2 and str.length(customSymbol2) > 0 ? request.security(customSymbol2, timeframe.period, high, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
-cmpLow3 = enableCustom2 and str.length(customSymbol2) > 0 ? request.security(customSymbol2, timeframe.period, low, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off) : na
+if comparisonMode == "Auto"
+    applyAutoComparisons(chartKey)
+else
+    applyManualComparisons()
 
-getComparisonHigh(idx) =>
-    idx == 0 ? cmpHigh0 : idx == 1 ? cmpHigh1 : idx == 2 ? cmpHigh2 : cmpHigh3
-
-getComparisonLow(idx) =>
-    idx == 0 ? cmpLow0 : idx == 1 ? cmpLow1 : idx == 2 ? cmpLow2 : cmpLow3
+for idx = 0 to COMPARISON_COUNT - 1
+    if array.get(comparisonEnabled, idx)
+        comparisonSymbol = array.get(comparisonSymbols, idx)
+        [cmpBarHigh, cmpBarLow] = request.security(comparisonSymbol, timeframe.period, [high, low], gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        array.set(comparisonBarHighs, idx, cmpBarHigh)
+        array.set(comparisonBarLows, idx, cmpBarLow)
+    else
+        array.set(comparisonBarHighs, idx, na)
+        array.set(comparisonBarLows, idx, na)
 
 deleteLiveObjects(lineArray, labelArray, idx) =>
     activeLine = array.get(lineArray, idx)
@@ -260,8 +358,8 @@ if isQuarterStart
 
     for idx = 0 to COMPARISON_COUNT - 1
         if array.get(comparisonEnabled, idx)
-            array.set(comparisonCurrentHighs, idx, getComparisonHigh(idx))
-            array.set(comparisonCurrentLows, idx, getComparisonLow(idx))
+            array.set(comparisonCurrentHighs, idx, array.get(comparisonBarHighs, idx))
+            array.set(comparisonCurrentLows, idx, array.get(comparisonBarLows, idx))
         else
             array.set(comparisonCurrentHighs, idx, na)
             array.set(comparisonCurrentLows, idx, na)
@@ -275,8 +373,8 @@ if low <= chartCurrentLow
 
 for idx = 0 to COMPARISON_COUNT - 1
     if array.get(comparisonEnabled, idx)
-        cmpHigh = getComparisonHigh(idx)
-        cmpLow = getComparisonLow(idx)
+        cmpHigh = array.get(comparisonBarHighs, idx)
+        cmpLow = array.get(comparisonBarLows, idx)
         currentCmpHigh = array.get(comparisonCurrentHighs, idx)
         currentCmpLow = array.get(comparisonCurrentLows, idx)
         nextCmpHigh = na(cmpHigh) ? currentCmpHigh : na(currentCmpHigh) ? cmpHigh : math.max(currentCmpHigh, cmpHigh)
@@ -292,19 +390,22 @@ lineStyle = lineStyleValue()
 for idx = 0 to COMPARISON_COUNT - 1
     if array.get(comparisonEnabled, idx)
         comparisonName = array.get(comparisonNames, idx)
+        comparisonRelation = array.get(comparisonRelations, idx)
         comparisonPrevHigh = array.get(comparisonPrevHighs, idx)
         comparisonPrevLow = array.get(comparisonPrevLows, idx)
         comparisonCurrentHigh = array.get(comparisonCurrentHighs, idx)
         comparisonCurrentLow = array.get(comparisonCurrentLows, idx)
+        isInverseComparison = comparisonRelation == REL_INVERSE
 
-        bearishCondition = showBearishSSMT and not na(chartPrevHigh) and not na(comparisonPrevHigh) and not na(chartCurrentHigh) and not na(comparisonCurrentHigh) and chartCurrentHigh > chartPrevHigh and comparisonCurrentHigh <= comparisonPrevHigh
-        bullishCondition = showBullishSSMT and not na(chartPrevLow) and not na(comparisonPrevLow) and not na(chartCurrentLow) and not na(comparisonCurrentLow) and chartCurrentLow < chartPrevLow and comparisonCurrentLow >= comparisonPrevLow
+        bearishCondition = showBearishSSMT and not na(chartPrevHigh) and not na(chartCurrentHigh) and chartCurrentHigh > chartPrevHigh and (isInverseComparison ? not na(comparisonPrevLow) and not na(comparisonCurrentLow) and comparisonCurrentLow >= comparisonPrevLow : not na(comparisonPrevHigh) and not na(comparisonCurrentHigh) and comparisonCurrentHigh <= comparisonPrevHigh)
+        bullishCondition = showBullishSSMT and not na(chartPrevLow) and not na(chartCurrentLow) and chartCurrentLow < chartPrevLow and (isInverseComparison ? not na(comparisonPrevHigh) and not na(comparisonCurrentHigh) and comparisonCurrentHigh <= comparisonPrevHigh : not na(comparisonPrevLow) and not na(comparisonCurrentLow) and comparisonCurrentLow >= comparisonPrevLow)
 
         activeBearish = bearishCondition
         activeBullish = bullishCondition
 
-        bearishText = "Bearish SSMT vs " + comparisonName
-        bullishText = "Bullish SSMT vs " + comparisonName
+        relationSuffix = isInverseComparison ? " (inv)" : ""
+        bearishText = "Bearish SSMT vs " + comparisonName + relationSuffix
+        bullishText = "Bullish SSMT vs " + comparisonName + relationSuffix
 
         currentBearishLine = array.get(bearishLines, idx)
         currentBearishLabel = array.get(bearishLabels, idx)

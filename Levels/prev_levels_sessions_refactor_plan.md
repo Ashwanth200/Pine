@@ -2,103 +2,99 @@
 
 ## Goal
 
-Refine `Levels/prev_levels_sessions_refactor.pine` so label rendering matches the level lines more cleanly and overlapping equal-price levels are merged into a single readable label.
+Refine `Levels/prev_levels_sessions_refactor.pine` so the chart stays readable by showing only levels that are still untaken.
 
-The current script already supports:
+The script already supports:
 
 - previous timeframe highs/lows
 - previous `RTH` highs/lows
 - previous `Asia`, `London`, and `New York` session highs/lows
+- merged labels and tighter label placement
 
-So this plan focuses only on the remaining rendering issue, not on adding new level families.
+So the next plan focuses on reducing congestion by hiding levels after price has taken them.
 
 ---
 
 ## Current Issue
 
-The indicator logic is mostly working, but the label layer still has 2 problems:
+The current indicator looks much better than before, but it can still become crowded because all previous levels remain visible until a newer level replaces them.
 
-1. labels sit too far away from the lines
-   - labels are vertically offset by a percentage of recent range
-   - on volatile charts this pushes them noticeably above high lines and below low lines
+That means:
 
-2. same-price labels do not merge
-   - if two enabled levels share the same exact price, the script currently creates separate labels
-   - collision avoidance then pushes them apart instead of combining them into one label like `D L | 1H L`
+- old highs can stay on screen even after price has already traded through them
+- old lows can stay on screen even after price has already traded through them
+- the chart keeps historical context, but the active execution view becomes cluttered
 
 ---
 
-## Root Cause In The Current Script
+## Proposed Solution
 
-### Vertical offset
+Hide a level once it has been taken or mitigated.
 
-The current label position is built from:
+In practice:
 
-- `labelOffsetPct`
-- `recentRange`
-- `labelOffset`
+- a previous high should disappear once price confirms it has traded through that high
+- a previous low should disappear once price confirms it has traded through that low
 
-Then each label uses:
-
-- `levelPrice + labelOffset` for highs
-- `levelPrice - labelOffset` for lows
-
-This means labels are intentionally detached from the level line before collision handling even starts.
-
-### Collision handling
-
-The current collision helper tracks already used y-values and keeps shifting new labels:
-
-- highs move upward
-- lows move downward
-
-That works for nearby-but-different prices, but it does not understand that two labels at the same level should be merged rather than separated.
-
-### One-level-one-label structure
-
-Right now the render pass creates one persistent label per source:
-
-- `lbDHigh`
-- `lb1HHigh`
-- `lbDLow`
-- `lb1HLow`
-- etc.
-
-That architecture makes it hard to support dynamic merged labels because the number of visible labels should depend on grouped price levels, not on the raw number of sources.
+This keeps the indicator focused on untouched liquidity or untouched reference levels.
 
 ---
 
-## Desired End State
+## Feasibility
 
-The script should keep all lines at their exact prices and improve only the label display.
+This is fully feasible in Pine Script v6.
 
-### Label placement
+The current script already redraws lines and labels from the latest state, so it is straightforward to conditionally stop rendering a level after it is taken.
 
-- labels should sit on the level price or as close to it as Pine allows visually
-- highs should still be eligible to stack upward when needed
-- lows should still be eligible to stack downward when needed
-- collision shifting should happen only when separate price groups are too close to each other
-
-### Label merging
-
-If multiple enabled levels share the same side and same normalized price, they should be merged into one label.
-
-Examples:
-
-- `D H | 1H H`
-- `D L | 1H L`
-- `W H | D H | 4H H`
-
-### Important rule
-
-- lines never move
-- only labels are aggregated or shifted
+No major rewrite is required.
 
 ---
 
-## Non-Repainting Constraint
+## Detection Rules
 
-The refactor must preserve the current level source logic exactly.
+There are 2 practical ways to define when a level is taken.
+
+### Option 1: wick touch
+
+- high taken when `high >= levelPrice`
+- low taken when `low <= levelPrice`
+
+Pros:
+
+- reacts immediately
+- removes clutter faster
+
+Cons:
+
+- can disappear intrabar and reappear conceptually if the user expects close confirmation
+- less stable during live candles
+
+### Option 2: close beyond
+
+- high taken when `close >= levelPrice`
+- low taken when `close <= levelPrice`
+
+Pros:
+
+- more stable
+- cleaner from a non-repainting perspective
+- usually closer to how traders define a confirmed sweep or mitigation
+
+Cons:
+
+- levels stay visible until the candle closes through them
+
+### Recommendation
+
+Use `close beyond` as the default behavior.
+
+This is the cleanest first implementation and avoids noisy intrabar hiding.
+
+---
+
+## Non-Repainting Consideration
+
+The level sources themselves should remain unchanged.
 
 Do not change:
 
@@ -107,130 +103,83 @@ Do not change:
 - session start/end detection
 - previous completed session storage
 
-This is a label-rendering refactor only.
-
----
-
-## Pine-Specific Constraints
-
-### Single label color
-
-A Pine `label` can only use one `textcolor`.
-
-So if a merged label contains multiple sources, we must choose one color owner.
-
-Recommended rule:
-
-- use the first merged source color based on fixed priority order
-
-Recommended priority order:
-
-- `1M`
-- `W`
-- `D`
-- `4H`
-- `90m`
-- `1H`
-- `15m`
-- `5m`
-- `RTH`
-- `Asia`
-- `London`
-- `NY`
-
-This makes higher timeframe labels visually dominant when merged.
-
-### Float equality
-
-Equal prices should not rely on raw float equality.
-
-Recommended grouping rule:
-
-- normalize prices to `syminfo.mintick`
-- merge levels when normalized prices match and both are on the same side (`high` with `high`, `low` with `low`)
-
-### Label anchoring limitation
-
-With `yloc.price` and `label.style_none`, Pine anchors text to a price level, but text height is still pixel-based.
-
-So "exactly on the line" is approximate in practice.
+Only the visibility of already-calculated levels should change.
 
 Recommended behavior:
 
-- anchor labels at `levelPrice`
-- only apply a tiny mintick-based nudge if visual testing proves necessary
+- mark a level as taken only using confirmed bar-close logic
+- hide the line and label after that confirmation
+
+This preserves the current stable level-calculation logic.
 
 ---
 
-## Implementation Strategy
+## Desired End State
 
-### Phase 1: keep all line logic unchanged
+The final behavior should be:
 
-Leave line creation and updating exactly as it is now.
+- untouched previous highs remain visible
+- untouched previous lows remain visible
+- taken highs disappear
+- taken lows disappear
+- labels disappear together with the level line
+- when a new previous period/session level forms, it behaves normally until taken
 
-This preserves:
+Example:
 
-- current level visibility
-- current styling inputs
-- current non-repainting behavior
+- previous day high is visible while price remains below it
+- once a candle closes above that previous day high, the `D H` line and label are hidden
+- the same logic applies to `W`, `1H`, `RTH`, `Asia`, `London`, and `NY` levels
 
-### Phase 2: split label rendering into an aggregation pass
+---
 
-Instead of calling `updateLevelLabel()` immediately for each source, collect enabled label candidates first.
+## Rendering Strategy
 
-Each candidate should store:
+The best approach is to conditionally hide levels, not permanently delete logic from the script.
 
-- price
-- side (`high` or `low`)
-- text
-- color
-- priority
+In practice:
 
-Example candidate rows:
+- compute whether each level is taken
+- if taken, do not pass it into the line renderer
+- if taken, do not pass it into the label candidate collector
 
-- `{price: prevDLow, side: low, text: "D L", color: colDLow, priority: 3}`
-- `{price: prev1HLow, side: low, text: "1H L", color: col1HLow, priority: 6}`
+This keeps the code simple and works well with the current render model.
 
-### Phase 3: merge equal-price candidates
+---
 
-Group candidates by:
+## Recommended Helper
 
-- normalized price
-- side
+Add a helper like:
 
-Then build one merged display row per group.
+- `isLevelTaken(levelPrice, isHigh)`
 
-Each merged row should produce:
+Recommended first implementation:
 
-- merged text joined with ` | `
-- one chosen text color based on priority
-- one final anchor price
+- for highs: return `close >= levelPrice`
+- for lows: return `close <= levelPrice`
 
-### Phase 4: run collision avoidance on merged groups only
+Optional later:
 
-After merge, apply collision handling only across distinct merged rows.
+- support a user input to switch between `close` and `wick` mode
 
-Recommended behavior:
+---
 
-- start with `desiredY = levelPrice`
-- if another merged row on the same side is too close, shift by collision step
-- highs shift upward
-- lows shift downward
+## Code Areas To Change
 
-This keeps true duplicates merged while still deconflicting genuinely crowded nearby levels.
+### Keep unchanged
 
-### Phase 5: replace fixed label variables with a reusable label pool
+- `getPrevTfLevel()`
+- timeframe enable logic
+- session tracking logic
+- line update helper structure
+- merged label structure
 
-The current fixed label variables do not fit dynamic merge counts.
+### Add or modify
 
-Recommended refactor:
-
-- keep line variables as they are
-- replace the many dedicated label variables with pooled label arrays
-- update labels by index during the last-bar render pass
-- delete extra pooled labels when fewer merged groups are visible
-
-This gives flexible support for merged labels without breaking object reuse.
+1. add a small taken-detection helper near the shared rendering helpers
+2. compute per-level visibility as `enabled and not taken`
+3. pass that filtered visibility into `updateLevelLine(...)`
+4. use the same filtered visibility for label collection so taken lines do not still show labels
 
 ---
 
@@ -238,99 +187,78 @@ This gives flexible support for merged labels without breaking object reuse.
 
 Inside `if barstate.islast`:
 
-1. clear collision-tracking arrays
-2. update all level lines exactly as today
-3. collect enabled label candidates into temporary arrays
-4. merge same-price candidates by side
-5. compute final y-position per merged row
-6. update pooled labels
-7. delete any unused pooled labels
+1. calculate each previous level as today
+2. calculate whether that level is taken
+3. derive final render visibility from:
+   - source enabled
+   - category enabled
+   - not taken
+4. draw only untaken lines
+5. collect labels only for untaken levels
+6. merge labels as today
+7. render merged labels as today
 
 ---
 
-## Recommended Helper Responsibilities
+## Behavior Choice: Temporary Hide vs Persistent Taken State
 
-### Keep
+There are 2 ways to manage taken levels.
 
-- `updateLevelLine()`
-- `getPrevTfLevel()`
-- session high/low tracking logic
+### Simpler option: direct conditional hide
 
-### Modify or replace
+Every bar, determine:
 
-- replace direct per-source `updateLevelLabel()` usage with aggregated rendering
-- either simplify `updateLevelLabel()` to operate on merged rows, or replace it with a pooled label updater
+- is this level taken right now?
 
-### Add
+If yes:
 
-- price normalization helper
-- label candidate collector helper
-- merge helper for same-price rows
-- pooled label update helper
+- do not render it
 
----
+Pros:
 
-## Collision Rules
+- smallest code change
+- easy to reason about
+- no extra state variables needed
 
-### Merge first
+### More advanced option: persistent taken flags
 
-If two sources belong to the same side and same normalized price:
+Store booleans so once a level is taken, it stays marked taken until the next previous level replaces it.
 
-- do not stack them
-- do not create separate labels
-- merge them into one label
+Pros:
 
-### Shift only after merge
+- more explicit lifecycle
 
-If two merged rows are still too close:
+Cons:
 
-- highs shift upward
-- lows shift downward
+- more state management
+- more reset logic required when the source level changes
 
-### Spacing basis
+### Recommendation
 
-Keep the current recent-range-based collision step for now because it already adapts across markets.
+Start with direct conditional hide.
 
-But reduce or remove the default base label offset so labels no longer start far from the line.
+That is the cleanest version for this script.
 
 ---
 
-## Recommended Defaults After Refactor
+## Inputs Recommendation
 
-- merged labels enabled by default
-- label anchor at the level price
-- collision avoidance enabled
-- highs stack upward only when needed
-- lows stack downward only when needed
-- higher timeframe color wins merged label ownership
+### First version
 
----
+No extra input required if we use a fixed rule:
 
-## Build Order
+- close beyond = taken
 
-### Step 1
+### Optional later input
 
-Preserve all existing level calculations and line updates.
+If needed later, add:
 
-### Step 2
+- `Hide Taken Levels`
+- `Taken Detection Mode` with options:
+  - `Close`
+  - `Wick`
 
-Refactor the last-bar label render pass into candidate collection.
-
-### Step 3
-
-Add mintick-normalized grouping and merged text generation.
-
-### Step 4
-
-Apply collision handling only to merged rows.
-
-### Step 5
-
-Replace fixed source label storage with pooled reusable labels.
-
-### Step 6
-
-Lint and visually verify in TradingView.
+But for now, keep it simple.
 
 ---
 
@@ -338,26 +266,27 @@ Lint and visually verify in TradingView.
 
 After coding, verify these cases:
 
-1. a single level label sits on or very near its line
-2. `D L` and `1H L` at the same price become `D L | 1H L`
-3. `D H` and `1H H` at the same price become `D H | 1H H`
-4. nearby but different prices still stack cleanly
-5. disabling a source removes its contribution from merged labels
-6. no extra stale labels remain after visibility changes
-7. previous timeframe and session values remain unchanged versus current behavior
+1. an untouched high remains visible
+2. an untouched low remains visible
+3. a high disappears after a candle closes through it
+4. a low disappears after a candle closes through it
+5. the matching label disappears with the line
+6. a newly formed previous level appears correctly after the next source period/session completes
+7. merged labels still work when multiple untaken levels share the same price
+8. level calculations themselves remain unchanged
 
 ---
 
 ## Final Recommendation
 
-The correct next step is not another broad refactor of the level engines.
+The next change should be a focused untaken-level filter, not another structural rewrite.
 
-The proper change is a focused label-rendering refactor that:
+The right implementation is:
 
-1. keeps the existing non-repainting price logic intact
-2. removes the large default label displacement from the line
-3. merges equal-price labels into a single string like `D | 1H`
-4. preserves collision avoidance only for distinct nearby price groups
-5. uses pooled labels so the dynamic merged output stays maintainable
+1. keep the current previous level calculations exactly as they are
+2. define a small helper for whether a high or low has been taken
+3. use `close beyond` as the default confirmation rule
+4. hide both the line and label once taken
+5. leave merged-label logic in place for untaken overlapping levels
 
-That gives the cleanest fix for the current indicator without disturbing the working level calculations.
+This will reduce chart congestion significantly while preserving the current indicator behavior and keeping the code change small.

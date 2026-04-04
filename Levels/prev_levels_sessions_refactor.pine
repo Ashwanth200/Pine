@@ -203,6 +203,11 @@ renderMergedLabels() =>
         label staleLabel = array.pop(pooledLabels)
         label.delete(staleLabel)
 
+getTakenState(bool existingTaken, float levelPrice, bool isHigh) =>
+    bool crossed = barstate.isconfirmed and not na(levelPrice) and (isHigh ? close >= levelPrice : close <= levelPrice)
+    bool isNewLevel = not na(levelPrice) and (na(levelPrice[1]) or levelPrice != levelPrice[1])
+    na(levelPrice) ? false : isNewLevel ? crossed : (existingTaken or crossed)
+
 updateLevelLine(bool enabled, float levelPrice, color levelColor, line existingLine) =>
     line nextLine = existingLine
     if enabled and not na(levelPrice)
@@ -297,52 +302,52 @@ if nyEnd
 
 var line l1MHigh = na
 var line l1MLow = na
-var label lb1MHigh = na
-var label lb1MLow = na
+var bool taken1MHigh = false
+var bool taken1MLow = false
 var line lWHigh = na
 var line lWLow = na
-var label lbWHigh = na
-var label lbWLow = na
+var bool takenWHigh = false
+var bool takenWLow = false
 var line lDHigh = na
 var line lDLow = na
-var label lbDHigh = na
-var label lbDLow = na
+var bool takenDHigh = false
+var bool takenDLow = false
 var line l4HHigh = na
 var line l4HLow = na
-var label lb4HHigh = na
-var label lb4HLow = na
+var bool taken4HHigh = false
+var bool taken4HLow = false
 var line l90MHigh = na
 var line l90MLow = na
-var label lb90MHigh = na
-var label lb90MLow = na
+var bool taken90MHigh = false
+var bool taken90MLow = false
 var line l1HHigh = na
 var line l1HLow = na
-var label lb1HHigh = na
-var label lb1HLow = na
+var bool taken1HHigh = false
+var bool taken1HLow = false
 var line l15MHigh = na
 var line l15MLow = na
-var label lb15MHigh = na
-var label lb15MLow = na
+var bool taken15MHigh = false
+var bool taken15MLow = false
 var line l5MHigh = na
 var line l5MLow = na
-var label lb5MHigh = na
-var label lb5MLow = na
+var bool taken5MHigh = false
+var bool taken5MLow = false
 var line lRthHigh = na
 var line lRthLow = na
-var label lbRthHigh = na
-var label lbRthLow = na
+var bool takenRthHigh = false
+var bool takenRthLow = false
 var line lAsiaHigh = na
 var line lAsiaLow = na
-var label lbAsiaHigh = na
-var label lbAsiaLow = na
+var bool takenAsiaHigh = false
+var bool takenAsiaLow = false
 var line lLondonHigh = na
 var line lLondonLow = na
-var label lbLondonHigh = na
-var label lbLondonLow = na
+var bool takenLondonHigh = false
+var bool takenLondonLow = false
 var line lNyHigh = na
 var line lNyLow = na
-var label lbNyHigh = na
-var label lbNyLow = na
+var bool takenNyHigh = false
+var bool takenNyLow = false
 
 bool enable1M = showHigherTf and show1M and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("1M")
 bool enableW = showHigherTf and showW and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("1W")
@@ -370,6 +375,68 @@ float prev15MLow = enable15M ? getPrevTfLevel("15", false) : na
 float prev5MHigh = enable5M ? getPrevTfLevel("5", true) : na
 float prev5MLow = enable5M ? getPrevTfLevel("5", false) : na
 
+taken1MHigh := getTakenState(taken1MHigh, prev1MHigh, true)
+taken1MLow := getTakenState(taken1MLow, prev1MLow, false)
+takenWHigh := getTakenState(takenWHigh, prevWHigh, true)
+takenWLow := getTakenState(takenWLow, prevWLow, false)
+takenDHigh := getTakenState(takenDHigh, prevDHigh, true)
+takenDLow := getTakenState(takenDLow, prevDLow, false)
+taken4HHigh := getTakenState(taken4HHigh, prev4HHigh, true)
+taken4HLow := getTakenState(taken4HLow, prev4HLow, false)
+taken90MHigh := getTakenState(taken90MHigh, prev90MHigh, true)
+taken90MLow := getTakenState(taken90MLow, prev90MLow, false)
+taken1HHigh := getTakenState(taken1HHigh, prev1HHigh, true)
+taken1HLow := getTakenState(taken1HLow, prev1HLow, false)
+taken15MHigh := getTakenState(taken15MHigh, prev15MHigh, true)
+taken15MLow := getTakenState(taken15MLow, prev15MLow, false)
+taken5MHigh := getTakenState(taken5MHigh, prev5MHigh, true)
+taken5MLow := getTakenState(taken5MLow, prev5MLow, false)
+
+bool show1MHigh = enable1M and not taken1MHigh
+bool show1MLow = enable1M and not taken1MLow
+bool showWHigh = enableW and not takenWHigh
+bool showWLow = enableW and not takenWLow
+bool showDHigh = enableD and not takenDHigh
+bool showDLow = enableD and not takenDLow
+bool show4HHigh = enable4H and not taken4HHigh
+bool show4HLow = enable4H and not taken4HLow
+bool show90MHigh = enable90M and not taken90MHigh
+bool show90MLow = enable90M and not taken90MLow
+bool show1HHigh = enable1H and not taken1HHigh
+bool show1HLow = enable1H and not taken1HLow
+bool show15MHigh = enable15M and not taken15MHigh
+bool show15MLow = enable15M and not taken15MLow
+bool show5MHigh = enable5M and not taken5MHigh
+bool show5MLow = enable5M and not taken5MLow
+
+bool enableRthHigh = showRthLevels and showRTH
+bool enableRthLow = showRthLevels and showRTH
+takenRthHigh := getTakenState(takenRthHigh, rthPrevHigh, true)
+takenRthLow := getTakenState(takenRthLow, rthPrevLow, false)
+bool showRthHigh = enableRthHigh and not takenRthHigh
+bool showRthLow = enableRthLow and not takenRthLow
+
+bool enableAsiaHigh = showSessionLevels and showAsia
+bool enableAsiaLow = showSessionLevels and showAsia
+takenAsiaHigh := getTakenState(takenAsiaHigh, asiaPrevHigh, true)
+takenAsiaLow := getTakenState(takenAsiaLow, asiaPrevLow, false)
+bool showAsiaHigh = enableAsiaHigh and not takenAsiaHigh
+bool showAsiaLow = enableAsiaLow and not takenAsiaLow
+
+bool enableLondonHigh = showSessionLevels and showLondon
+bool enableLondonLow = showSessionLevels and showLondon
+takenLondonHigh := getTakenState(takenLondonHigh, londonPrevHigh, true)
+takenLondonLow := getTakenState(takenLondonLow, londonPrevLow, false)
+bool showLondonHigh = enableLondonHigh and not takenLondonHigh
+bool showLondonLow = enableLondonLow and not takenLondonLow
+
+bool enableNyHigh = showSessionLevels and showNY
+bool enableNyLow = showSessionLevels and showNY
+takenNyHigh := getTakenState(takenNyHigh, nyPrevHigh, true)
+takenNyLow := getTakenState(takenNyLow, nyPrevLow, false)
+bool showNyHigh = enableNyHigh and not takenNyHigh
+bool showNyLow = enableNyLow and not takenNyLow
+
 if barstate.islast
     array.clear(placedHighYs)
     array.clear(placedLowYs)
@@ -378,66 +445,58 @@ if barstate.islast
     array.clear(labelIsHighs)
     array.clear(labelColors)
 
-    l1MHigh := updateLevelLine(enable1M, prev1MHigh, col1MHigh, l1MHigh)
-    addLabelCandidate("1M", enable1M, prev1MHigh, true, col1MHigh)
-    l1MLow := updateLevelLine(enable1M, prev1MLow, col1MLow, l1MLow)
-    addLabelCandidate("1M", enable1M, prev1MLow, false, col1MLow)
-    lWHigh := updateLevelLine(enableW, prevWHigh, colWHigh, lWHigh)
-    addLabelCandidate("W", enableW, prevWHigh, true, colWHigh)
-    lWLow := updateLevelLine(enableW, prevWLow, colWLow, lWLow)
-    addLabelCandidate("W", enableW, prevWLow, false, colWLow)
-    lDHigh := updateLevelLine(enableD, prevDHigh, colDHigh, lDHigh)
-    addLabelCandidate("D", enableD, prevDHigh, true, colDHigh)
-    lDLow := updateLevelLine(enableD, prevDLow, colDLow, lDLow)
-    addLabelCandidate("D", enableD, prevDLow, false, colDLow)
-    l4HHigh := updateLevelLine(enable4H, prev4HHigh, col4HHigh, l4HHigh)
-    addLabelCandidate("4H", enable4H, prev4HHigh, true, col4HHigh)
-    l4HLow := updateLevelLine(enable4H, prev4HLow, col4HLow, l4HLow)
-    addLabelCandidate("4H", enable4H, prev4HLow, false, col4HLow)
-    l90MHigh := updateLevelLine(enable90M, prev90MHigh, col90MHigh, l90MHigh)
-    addLabelCandidate("90m", enable90M, prev90MHigh, true, col90MHigh)
-    l90MLow := updateLevelLine(enable90M, prev90MLow, col90MLow, l90MLow)
-    addLabelCandidate("90m", enable90M, prev90MLow, false, col90MLow)
-    l1HHigh := updateLevelLine(enable1H, prev1HHigh, col1HHigh, l1HHigh)
-    addLabelCandidate("1H", enable1H, prev1HHigh, true, col1HHigh)
-    l1HLow := updateLevelLine(enable1H, prev1HLow, col1HLow, l1HLow)
-    addLabelCandidate("1H", enable1H, prev1HLow, false, col1HLow)
-    l15MHigh := updateLevelLine(enable15M, prev15MHigh, col15MHigh, l15MHigh)
-    addLabelCandidate("15m", enable15M, prev15MHigh, true, col15MHigh)
-    l15MLow := updateLevelLine(enable15M, prev15MLow, col15MLow, l15MLow)
-    addLabelCandidate("15m", enable15M, prev15MLow, false, col15MLow)
-    l5MHigh := updateLevelLine(enable5M, prev5MHigh, col5MHigh, l5MHigh)
-    addLabelCandidate("5m", enable5M, prev5MHigh, true, col5MHigh)
-    l5MLow := updateLevelLine(enable5M, prev5MLow, col5MLow, l5MLow)
-    addLabelCandidate("5m", enable5M, prev5MLow, false, col5MLow)
+    l1MHigh := updateLevelLine(show1MHigh, prev1MHigh, col1MHigh, l1MHigh)
+    addLabelCandidate("1M", show1MHigh, prev1MHigh, true, col1MHigh)
+    l1MLow := updateLevelLine(show1MLow, prev1MLow, col1MLow, l1MLow)
+    addLabelCandidate("1M", show1MLow, prev1MLow, false, col1MLow)
+    lWHigh := updateLevelLine(showWHigh, prevWHigh, colWHigh, lWHigh)
+    addLabelCandidate("W", showWHigh, prevWHigh, true, colWHigh)
+    lWLow := updateLevelLine(showWLow, prevWLow, colWLow, lWLow)
+    addLabelCandidate("W", showWLow, prevWLow, false, colWLow)
+    lDHigh := updateLevelLine(showDHigh, prevDHigh, colDHigh, lDHigh)
+    addLabelCandidate("D", showDHigh, prevDHigh, true, colDHigh)
+    lDLow := updateLevelLine(showDLow, prevDLow, colDLow, lDLow)
+    addLabelCandidate("D", showDLow, prevDLow, false, colDLow)
+    l4HHigh := updateLevelLine(show4HHigh, prev4HHigh, col4HHigh, l4HHigh)
+    addLabelCandidate("4H", show4HHigh, prev4HHigh, true, col4HHigh)
+    l4HLow := updateLevelLine(show4HLow, prev4HLow, col4HLow, l4HLow)
+    addLabelCandidate("4H", show4HLow, prev4HLow, false, col4HLow)
+    l90MHigh := updateLevelLine(show90MHigh, prev90MHigh, col90MHigh, l90MHigh)
+    addLabelCandidate("90m", show90MHigh, prev90MHigh, true, col90MHigh)
+    l90MLow := updateLevelLine(show90MLow, prev90MLow, col90MLow, l90MLow)
+    addLabelCandidate("90m", show90MLow, prev90MLow, false, col90MLow)
+    l1HHigh := updateLevelLine(show1HHigh, prev1HHigh, col1HHigh, l1HHigh)
+    addLabelCandidate("1H", show1HHigh, prev1HHigh, true, col1HHigh)
+    l1HLow := updateLevelLine(show1HLow, prev1HLow, col1HLow, l1HLow)
+    addLabelCandidate("1H", show1HLow, prev1HLow, false, col1HLow)
+    l15MHigh := updateLevelLine(show15MHigh, prev15MHigh, col15MHigh, l15MHigh)
+    addLabelCandidate("15m", show15MHigh, prev15MHigh, true, col15MHigh)
+    l15MLow := updateLevelLine(show15MLow, prev15MLow, col15MLow, l15MLow)
+    addLabelCandidate("15m", show15MLow, prev15MLow, false, col15MLow)
+    l5MHigh := updateLevelLine(show5MHigh, prev5MHigh, col5MHigh, l5MHigh)
+    addLabelCandidate("5m", show5MHigh, prev5MHigh, true, col5MHigh)
+    l5MLow := updateLevelLine(show5MLow, prev5MLow, col5MLow, l5MLow)
+    addLabelCandidate("5m", show5MLow, prev5MLow, false, col5MLow)
 
-    bool enableRthHigh = showRthLevels and showRTH
-    bool enableRthLow = showRthLevels and showRTH
-    lRthHigh := updateLevelLine(enableRthHigh, rthPrevHigh, colRthHigh, lRthHigh)
-    addLabelCandidate("RTH", enableRthHigh, rthPrevHigh, true, colRthHigh)
-    lRthLow := updateLevelLine(enableRthLow, rthPrevLow, colRthLow, lRthLow)
-    addLabelCandidate("RTH", enableRthLow, rthPrevLow, false, colRthLow)
+    lRthHigh := updateLevelLine(showRthHigh, rthPrevHigh, colRthHigh, lRthHigh)
+    addLabelCandidate("RTH", showRthHigh, rthPrevHigh, true, colRthHigh)
+    lRthLow := updateLevelLine(showRthLow, rthPrevLow, colRthLow, lRthLow)
+    addLabelCandidate("RTH", showRthLow, rthPrevLow, false, colRthLow)
 
-    bool enableAsiaHigh = showSessionLevels and showAsia
-    bool enableAsiaLow = showSessionLevels and showAsia
-    lAsiaHigh := updateLevelLine(enableAsiaHigh, asiaPrevHigh, colAsiaHigh, lAsiaHigh)
-    addLabelCandidate("Asia", enableAsiaHigh, asiaPrevHigh, true, colAsiaHigh)
-    lAsiaLow := updateLevelLine(enableAsiaLow, asiaPrevLow, colAsiaLow, lAsiaLow)
-    addLabelCandidate("Asia", enableAsiaLow, asiaPrevLow, false, colAsiaLow)
+    lAsiaHigh := updateLevelLine(showAsiaHigh, asiaPrevHigh, colAsiaHigh, lAsiaHigh)
+    addLabelCandidate("Asia", showAsiaHigh, asiaPrevHigh, true, colAsiaHigh)
+    lAsiaLow := updateLevelLine(showAsiaLow, asiaPrevLow, colAsiaLow, lAsiaLow)
+    addLabelCandidate("Asia", showAsiaLow, asiaPrevLow, false, colAsiaLow)
 
-    bool enableLondonHigh = showSessionLevels and showLondon
-    bool enableLondonLow = showSessionLevels and showLondon
-    lLondonHigh := updateLevelLine(enableLondonHigh, londonPrevHigh, colLondonHigh, lLondonHigh)
-    addLabelCandidate("London", enableLondonHigh, londonPrevHigh, true, colLondonHigh)
-    lLondonLow := updateLevelLine(enableLondonLow, londonPrevLow, colLondonLow, lLondonLow)
-    addLabelCandidate("London", enableLondonLow, londonPrevLow, false, colLondonLow)
+    lLondonHigh := updateLevelLine(showLondonHigh, londonPrevHigh, colLondonHigh, lLondonHigh)
+    addLabelCandidate("London", showLondonHigh, londonPrevHigh, true, colLondonHigh)
+    lLondonLow := updateLevelLine(showLondonLow, londonPrevLow, colLondonLow, lLondonLow)
+    addLabelCandidate("London", showLondonLow, londonPrevLow, false, colLondonLow)
 
-    bool enableNyHigh = showSessionLevels and showNY
-    bool enableNyLow = showSessionLevels and showNY
-    lNyHigh := updateLevelLine(enableNyHigh, nyPrevHigh, colNyHigh, lNyHigh)
-    addLabelCandidate("NY", enableNyHigh, nyPrevHigh, true, colNyHigh)
-    lNyLow := updateLevelLine(enableNyLow, nyPrevLow, colNyLow, lNyLow)
-    addLabelCandidate("NY", enableNyLow, nyPrevLow, false, colNyLow)
+    lNyHigh := updateLevelLine(showNyHigh, nyPrevHigh, colNyHigh, lNyHigh)
+    addLabelCandidate("NY", showNyHigh, nyPrevHigh, true, colNyHigh)
+    lNyLow := updateLevelLine(showNyLow, nyPrevLow, colNyLow, lNyLow)
+    addLabelCandidate("NY", showNyLow, nyPrevLow, false, colNyLow)
 
     mergeLabelCandidates()
     renderMergedLabels()
